@@ -1,21 +1,14 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const { generateText } = require('ai');
-const { google } = require('@ai-sdk/google');
+const fetch = require('node-fetch');
 
 const app = express();
 app.use(bodyParser.json());
 
-// Your tokens - NOT CHANGED
+// Your tokens
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
 const GEMINI_API_KEY = 'AIzaSyA6mUrIepWtTRXe7RowqQvtIG8ajyK9RzM';
-
-// Set environment variable for AI SDK
-process.env.GOOGLE_GENERATIVE_AI_API_KEY = GEMINI_API_KEY;
-
-// Initialize Gemini model
-const model = google('gemini-2.5-flash');
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -30,76 +23,112 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Receive messages - FIXED VERSION
+// Receive messages - CRITICAL: Don't send response until AFTER processing
 app.post('/webhook', async (req, res) => {
-  const body = req.body;
+  try {
+    const body = req.body;
+    console.log('Webhook received:', JSON.stringify(body));
 
-  // Send 200 OK immediately
-  res.status(200).send('EVENT_RECEIVED');
+    if (body.object === 'page') {
+      // Process all entries
+      for (const entry of body.entry) {
+        for (const event of entry.messaging) {
+          if (event.message && event.message.text) {
+            const senderID = event.sender.id;
+            const userMessage = event.message.text;
 
-  if (body.object === 'page') {
-    // Process each entry
-    for (const entry of body.entry) {
-      const webhookEvent = entry.messaging[0];
-      
-      if (!webhookEvent || !webhookEvent.sender) continue;
-      
-      const senderID = webhookEvent.sender.id;
-      const message = webhookEvent.message;
+            console.log(`Message from ${senderID}: ${userMessage}`);
 
-      if (message && message.text) {
-        const userMessage = message.text;
-        
-        try {
-          console.log('Received message:', userMessage);
-          
-          // Ask Gemini using Vercel AI SDK
-          const { text } = await generateText({
-            model: model,
-            prompt: userMessage,
-          });
-          
-          console.log('Gemini response:', text);
-          
-          // Send reply back to user
-          const result = await sendMessage(senderID, text);
-          console.log('Message sent:', result);
-          
-        } catch (error) {
-          console.error('Error:', error);
-          await sendMessage(senderID, 'Sorry, I encountered an error. Please try again.');
+            try {
+              // Call Gemini API directly
+              const aiReply = await callGeminiAPI(userMessage);
+              console.log(`Gemini response: ${aiReply}`);
+
+              // Send reply to Facebook
+              await sendFacebookMessage(senderID, aiReply);
+              console.log('Message sent successfully');
+
+            } catch (error) {
+              console.error('Error processing message:', error);
+              await sendFacebookMessage(senderID, 'Sorry, I encountered an error. Please try again.');
+            }
+          }
         }
       }
     }
+
+    // ONLY send response AFTER everything is done
+    res.status(200).send('EVENT_RECEIVED');
+
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(500).send('ERROR');
   }
 });
 
-// Function to send message
-async function sendMessage(recipientID, messageText) {
-  const response = await fetch(
-    `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipient: { id: recipientID },
-        message: { text: messageText }
-      })
-    }
-  );
-  return response.json();
+// Function to call Gemini API directly
+async function callGeminiAPI(userMessage) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{
+          text: userMessage
+        }]
+      }]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  
+  if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+    return data.candidates[0].content.parts[0].text;
+  }
+  
+  throw new Error('No response from Gemini');
 }
 
-// Health check endpoint
+// Function to send message to Facebook
+async function sendFacebookMessage(recipientID, messageText) {
+  const url = `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientID },
+      message: { text: messageText }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Facebook API error: ${response.status} - ${errorText}`);
+  }
+
+  return await response.json();
+}
+
+// Health check
 app.get('/', (req, res) => {
   res.send('Bot is running!');
 });
 
-// For Vercel serverless
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
 
-// Export for Vercel
 module.exports = app;
