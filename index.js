@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 // Your tokens
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = 'AIzaSyDCMOnj2vuX4cZ-_6UkrAr6llxdzP-ipoI';
+const OPENROUTER_API_KEY = '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';
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -30,10 +30,9 @@ app.post('/webhook', async (req, res) => {
     console.log('Webhook received:', JSON.stringify(body));
 
     if (body.object === 'page') {
-      // Process all entries
       for (const entry of body.entry) {
         for (const event of entry.messaging) {
-          // Ignore echo messages (bot's own messages)
+          // Ignore echo messages
           if (event.message && event.message.text && !event.message.is_echo) {
             const senderID = event.sender.id;
             const userMessage = event.message.text;
@@ -41,9 +40,9 @@ app.post('/webhook', async (req, res) => {
             console.log(`Message from ${senderID}: ${userMessage}`);
 
             try {
-              // Call Gemini API directly
-              const aiReply = await callGeminiAPI(userMessage);
-              console.log(`Gemini response: ${aiReply}`);
+              // Call DeepSeek V3.1 via OpenRouter (SMARTEST FREE MODEL)
+              const aiReply = await callDeepSeekAPI(userMessage);
+              console.log(`DeepSeek response: ${aiReply}`);
 
               // Send reply to Facebook
               await sendFacebookMessage(senderID, aiReply);
@@ -58,7 +57,6 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // ONLY send response AFTER everything is done
     res.status(200).send('EVENT_RECEIVED');
 
   } catch (error) {
@@ -67,37 +65,41 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Function to call Gemini API directly
-async function callGeminiAPI(userMessage) {
-  // CHANGED TO PRO MODEL (smarter but lower daily limit)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
+// Function to call DeepSeek V3.1 via OpenRouter (FREE!)
+async function callDeepSeekAPI(userMessage) {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://messenger-gemini-bot.vercel.app',  // Optional but recommended
+      'X-Title': 'Messenger AI Bot'  // Optional but recommended
     },
     body: JSON.stringify({
-      contents: [{
-        parts: [{
-          text: userMessage
-        }]
-      }]
+      model: 'deepseek/deepseek-chat-v3.1:free',  // LATEST FREE MODEL (V3.1 - SMARTEST!)
+      messages: [{
+        role: 'user',
+        content: userMessage
+      }],
+      temperature: 0.7,
+      max_tokens: 2000
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   
-  if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-    return data.candidates[0].content.parts[0].text;
+  if (data.choices && data.choices[0] && data.choices[0].message) {
+    return data.choices[0].message.content;
   }
   
-  throw new Error('No response from Gemini');
+  throw new Error('No response from DeepSeek');
 }
 
 // Function to send message to Facebook
@@ -125,7 +127,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('Bot is running!');
+  res.send('Bot is running with DeepSeek V3.1 - The smartest free AI!');
 });
 
 const PORT = process.env.PORT || 3000;
