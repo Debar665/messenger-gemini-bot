@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 // Your tokens
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = 'AIzaSyAHMw_mH5a32ApOIHoqHavUyvDPuPjBHbQ';
+const GEMINI_API_KEY = 'AIzaSyDCMOnj2vuX4cZ-_6UkrAr6llxdzP-ipoI';
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
