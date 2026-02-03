@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 // Your tokens
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = 'AIzaSyA6mUrIepWtTRXe7RowqQvtIG8ajyK9RzM';
+const GEMINI_API_KEY = 'AIzaSyAgQjr-_ZyBXUdjpxM_XRF8toLaXuuhJrg';
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -69,7 +69,8 @@ app.post('/webhook', async (req, res) => {
 
 // Function to call Gemini API directly
 async function callGeminiAPI(userMessage) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  // CHANGED TO PRO MODEL (smarter but lower daily limit)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
 
   const response = await fetch(url, {
     method: 'POST',
