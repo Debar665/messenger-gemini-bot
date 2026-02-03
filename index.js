@@ -9,7 +9,7 @@ app.use(bodyParser.json());
 // Your tokens - NOT CHANGED
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = 'AIzaSyDRiMBJzpe0LiwNEb8UmINkq4ILw2fHpBU';
+const GEMINI_API_KEY = 'AIzaSyA6mUrIepWtTRXe7RowqQvtIG8ajyK9RzM';
 
 // Set environment variable for AI SDK
 process.env.GOOGLE_GENERATIVE_AI_API_KEY = GEMINI_API_KEY;
@@ -30,13 +30,20 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Receive messages
+// Receive messages - FIXED VERSION
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
+  // Send 200 OK immediately
+  res.status(200).send('EVENT_RECEIVED');
+
   if (body.object === 'page') {
-    body.entry.forEach(async (entry) => {
+    // Process each entry
+    for (const entry of body.entry) {
       const webhookEvent = entry.messaging[0];
+      
+      if (!webhookEvent || !webhookEvent.sender) continue;
+      
       const senderID = webhookEvent.sender.id;
       const message = webhookEvent.message;
 
@@ -44,23 +51,26 @@ app.post('/webhook', async (req, res) => {
         const userMessage = message.text;
         
         try {
+          console.log('Received message:', userMessage);
+          
           // Ask Gemini using Vercel AI SDK
           const { text } = await generateText({
             model: model,
             prompt: userMessage,
           });
           
+          console.log('Gemini response:', text);
+          
           // Send reply back to user
-          await sendMessage(senderID, text);
+          const result = await sendMessage(senderID, text);
+          console.log('Message sent:', result);
+          
         } catch (error) {
           console.error('Error:', error);
           await sendMessage(senderID, 'Sorry, I encountered an error. Please try again.');
         }
       }
-    });
-    res.status(200).send('EVENT_RECEIVED');
-  } else {
-    res.sendStatus(404);
+    }
   }
 });
 
