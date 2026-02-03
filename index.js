@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 // Your tokens
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = 'AIzaSyBx5Vuz65X-DL3QTiwwLEx8lGb9Y-Ai4W8';
+const GEMINI_API_KEY = 'AIzaSyA6mUrIepWtTRXe7RowqQvtIG8ajyK9RzM';
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -23,7 +23,7 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Receive messages - CRITICAL: Don't send response until AFTER processing
+// Receive messages
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
@@ -33,7 +33,8 @@ app.post('/webhook', async (req, res) => {
       // Process all entries
       for (const entry of body.entry) {
         for (const event of entry.messaging) {
-          if (event.message && event.message.text) {
+          // Ignore echo messages (bot's own messages)
+          if (event.message && event.message.text && !event.message.is_echo) {
             const senderID = event.sender.id;
             const userMessage = event.message.text;
 
