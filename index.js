@@ -9,7 +9,7 @@ app.use(bodyParser.json());
 // Your tokens - NOT CHANGED
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = 'AIzaSyA6mUrIepWtTRXe7RowqQvtIG8ajyK9RzM';
+const GEMINI_API_KEY = 'AIzaSyDRiMBJzpe0LiwNEb8UmINkq4ILw2fHpBU';
 
 // Set environment variable for AI SDK
 process.env.GOOGLE_GENERATIVE_AI_API_KEY = GEMINI_API_KEY;
