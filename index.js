@@ -1,18 +1,21 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateText } = require('ai');
+const { google } = require('@ai-sdk/google');
 
 const app = express();
 app.use(bodyParser.json());
 
-// Your tokens - REPLACE THESE!
+// Your tokens - NOT CHANGED
 const PAGE_ACCESS_TOKEN = 'EAAUBZCxMBc3gBQqaaEwsnLAvhIwEUTgN3EHYnm0GCmHVaxAqGb7E4yJSKOfrhOMO8ZCV9T2qHZAEeQzZAYXQZBusEg9bQYiJpixsGFToWusTj4qCdWPS7M0i6q6P8JmramD4Oc3rF2oNZCx8wwBSZBDzyioNx0LTDgOZC0kFi6xZAbBZAoc0Smgwm49KoZCIW5TZCAaARxpMZAOKlEwLr5jKZCMZCve';
 const VERIFY_TOKEN = 'my_secret_verify_token_12345';
 const GEMINI_API_KEY = 'AIzaSyA6mUrIepWtTRXe7RowqQvtIG8ajyK9RzM';
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });  // ← ONLY THIS LINE CHANGED
+// Set environment variable for AI SDK
+process.env.GOOGLE_GENERATIVE_AI_API_KEY = GEMINI_API_KEY;
+
+// Initialize Gemini model
+const model = google('gemini-2.5-flash');
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -41,13 +44,14 @@ app.post('/webhook', async (req, res) => {
         const userMessage = message.text;
         
         try {
-          // Ask Gemini
-          const result = await model.generateContent(userMessage);
-          const response = await result.response;
-          const aiReply = response.text();
+          // Ask Gemini using Vercel AI SDK
+          const { text } = await generateText({
+            model: model,
+            prompt: userMessage,
+          });
           
           // Send reply back to user
-          await sendMessage(senderID, aiReply);
+          await sendMessage(senderID, text);
         } catch (error) {
           console.error('Error:', error);
           await sendMessage(senderID, 'Sorry, I encountered an error. Please try again.');
