@@ -23,7 +23,7 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Receive messages - SYNCHRONOUS (WORKS!)
+// Receive messages and postbacks
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
@@ -34,6 +34,7 @@ app.post('/webhook', async (req, res) => {
         const pageID = entry.id;
         
         for (const event of entry.messaging) {
+          // Handle regular messages
           if (event.message && 
               event.message.text && 
               !event.message.is_echo &&
@@ -46,14 +47,11 @@ app.post('/webhook', async (req, res) => {
             console.log(`Message from ${senderID}: ${userMessage}`);
 
             try {
-              // Show typing indicator (fast, won't timeout)
               sendTypingIndicator(senderID, true).catch(() => {});
 
-              // Get AI response (WAIT for it synchronously)
               const aiReply = await callDeepSeekAPI(userMessage);
               console.log('AI response received');
 
-              // Send reply
               await sendFacebookMessage(senderID, aiReply);
               console.log('Message sent successfully');
 
@@ -65,15 +63,56 @@ app.post('/webhook', async (req, res) => {
                 console.error('Failed to send error:', sendError.message);
               }
             } finally {
-              // Turn off typing
               sendTypingIndicator(senderID, false).catch(() => {});
+            }
+          }
+          
+          // Handle button clicks (postbacks)
+          else if (event.postback) {
+            const senderID = event.sender.id;
+            const payload = event.postback.payload;
+
+            console.log(`Postback from ${senderID}: ${payload}`);
+
+            try {
+              let response = '';
+              
+              switch(payload) {
+                case 'GET_STARTED':
+                  response = "👋 Welcome! I'm your AI assistant. I can:\n\n✅ Answer questions\n✅ Provide information\n✅ Have intelligent conversations\n✅ Help with various topics\n\nJust type your question and I'll respond!";
+                  break;
+                  
+                case 'ABOUT_BOT':
+                  response = "🤖 I'm an AI assistant powered by DeepSeek R1T2 Chimera, one of the most advanced AI models.\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
+                  break;
+                  
+                case 'START_CHAT':
+                  response = "💬 Great! I'm ready to chat. Ask me anything you'd like to know!";
+                  break;
+                  
+                case 'HELP':
+                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions\n\n**Tips:**\n• Be specific for better answers\n• I can't access real-time info (sports scores, news)\n• I'm here 24/7!\n\nWhat can I help you with?";
+                  break;
+                  
+                case 'MAIN_MENU':
+                  response = "🏠 **Main Menu**\n\nWhat would you like to do?\n\n• Ask me a question\n• Learn what I can do\n• Get help using the bot\n\nJust type your message!";
+                  break;
+                  
+                default:
+                  response = "I'm here to help! What would you like to know?";
+              }
+              
+              await sendFacebookMessage(senderID, response);
+              console.log('Postback response sent');
+
+            } catch (error) {
+              console.error('Error handling postback:', error.message);
             }
           }
         }
       }
     }
 
-    // Send response AFTER processing (critical for serverless!)
     res.status(200).send('EVENT_RECEIVED');
 
   } catch (error) {
@@ -82,7 +121,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Typing indicator (fire and forget - ok to fail)
+// Typing indicator
 async function sendTypingIndicator(recipientID, isTyping) {
   try {
     await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
@@ -94,7 +133,7 @@ async function sendTypingIndicator(recipientID, isTyping) {
       })
     });
   } catch (error) {
-    // Ignore typing indicator failures
+    // Ignore
   }
 }
 
@@ -102,7 +141,6 @@ async function sendTypingIndicator(recipientID, isTyping) {
 async function callDeepSeekAPI(userMessage) {
   const url = 'https://openrouter.ai/api/v1/chat/completions';
 
-  // Current date/time
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -135,7 +173,7 @@ Keep responses SHORT and conversational. If asked about real-time info (sports s
         { role: 'user', content: userMessage }
       ],
       temperature: 0.7,
-      max_tokens: 1000  // Shorter = faster
+      max_tokens: 1000
     })
   });
 
@@ -176,7 +214,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('🤖 Bot Running - DeepSeek R1T2 Chimera');
+  res.send('🤖 Professional AI Bot - DeepSeek R1T2 Chimera');
 });
 
 const PORT = process.env.PORT || 3000;
