@@ -1,7 +1,7 @@
 {
   "name": "messenger-gemini-bot",
   "version": "1.0.0",
-  "description": "Messenger bot with Gemini AI",
+  "description": "Messenger bot with AI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
