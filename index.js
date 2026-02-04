@@ -9,8 +9,41 @@ app.use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const WEATHERAPI_KEY = process.env.WEATHERAPI_KEY; // Get free key from weatherapi.com
-const SPORTSDB_KEY = process.env.SPORTSDB_KEY || '3'; // Free test key, upgrade at thesportsdb.com
+
+// Conversation memory (stores last few messages per user)
+const conversationMemory = new Map();
+
+// Get conversation history for a user
+function getConversationHistory(userId) {
+  if (!conversationMemory.has(userId)) {
+    conversationMemory.set(userId, []);
+  }
+  return conversationMemory.get(userId);
+}
+
+// Add message to conversation history
+function addToHistory(userId, role, content) {
+  const history = getConversationHistory(userId);
+  history.push({ role, content, timestamp: Date.now() });
+  
+  // Keep only last 10 messages
+  if (history.length > 10) {
+    history.shift();
+  }
+}
+
+// Clean old conversations (older than 1 hour)
+setInterval(() => {
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  for (const [userId, history] of conversationMemory.entries()) {
+    const filtered = history.filter(msg => msg.timestamp > oneHourAgo);
+    if (filtered.length === 0) {
+      conversationMemory.delete(userId);
+    } else {
+      conversationMemory.set(userId, filtered);
+    }
+  }
+}, 10 * 60 * 1000); // Clean every 10 minutes
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -29,7 +62,6 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
-    console.log('Webhook received');
 
     if (body.object === 'page') {
       for (const entry of body.entry) {
@@ -46,32 +78,27 @@ app.post('/webhook', async (req, res) => {
             const senderID = event.sender.id;
             const userMessage = event.message.text;
 
-            console.log(`Message from ${senderID}: ${userMessage}`);
-
             try {
               sendTypingIndicator(senderID, true).catch(() => {});
 
-              // Check if user is asking for real-time data
+              // Check for real-time data needs
               const realtimeData = await checkAndGetRealtimeData(userMessage);
               
-              let aiReply;
-              if (realtimeData) {
-                // User asked for real-time data, get AI to format the response
-                aiReply = await callDeepSeekAPI(userMessage, realtimeData);
-              } else {
-                // Regular conversation
-                aiReply = await callDeepSeekAPI(userMessage);
-              }
-              
-              console.log('AI response received');
+              // Get AI response with conversation history
+              const aiReply = await callAI(senderID, userMessage, realtimeData);
 
               await sendFacebookMessage(senderID, aiReply);
-              console.log('Message sent successfully');
 
             } catch (error) {
               console.error('Error:', error.message);
               try {
-                await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
+                const errorResponses = [
+                  "Oops, something went wrong on my end. Mind trying that again?",
+                  "Sorry, I hit a snag there. Could you rephrase that?",
+                  "Hmm, I'm having a moment. Can you ask me that again?",
+                ];
+                const randomError = errorResponses[Math.floor(Math.random() * errorResponses.length)];
+                await sendFacebookMessage(senderID, randomError);
               } catch (sendError) {
                 console.error('Failed to send error:', sendError.message);
               }
@@ -85,38 +112,35 @@ app.post('/webhook', async (req, res) => {
             const senderID = event.sender.id;
             const payload = event.postback.payload;
 
-            console.log(`Postback from ${senderID}: ${payload}`);
-
             try {
               let response = '';
               
               switch(payload) {
                 case 'GET_STARTED':
-                  response = "👋 Welcome! I'm your intelligent AI assistant. I can:\n\n✅ Answer questions\n🌤️ Check weather anywhere\n⚽ Get sports scores & stats\n📰 Share latest news\n💬 Have intelligent conversations\n\nJust ask me anything!";
+                  response = "👋 Hey there! I'm your AI companion powered by the latest 2026 technology.\n\nI can help you with:\n✨ Real-time weather & sports\n💬 Smart conversations\n🌍 Current info & news\n📊 Quick facts & explanations\n\nWhat's on your mind?";
                   break;
                   
                 case 'ABOUT_BOT':
-                  response = "🤖 I'm powered by DeepSeek R1T2 Chimera, one of the most advanced AI models.\n\nI have real-time access to:\n• Weather data (any city)\n• Sports scores & stats\n• Latest news headlines\n• General knowledge\n\nTry asking: 'What's the weather in London?' or 'Who won the last Lakers game?'";
+                  response = "🤖 I'm running on cutting-edge AI from 2026!\n\nI combine:\n• Advanced language understanding\n• Real-time data access\n• Context-aware responses\n• Natural conversations\n\nI remember our chat context and get smarter with each conversation. Ask me anything!";
                   break;
                   
                 case 'START_CHAT':
-                  response = "💬 Great! I'm ready to help. You can ask me about weather, sports, news, or anything else!";
+                  response = "Perfect! 😊 I'm all ears. What would you like to talk about or know?";
                   break;
                   
                 case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I can get real-time data for:\n   • Weather (\"weather in Paris\")\n   • Sports (\"Lakers score\", \"Premier League\")\n   • News (\"latest tech news\")\n\n**Tips:**\n• Be specific for better answers\n• I have access to live data!\n• Available 24/7!\n\nWhat can I help you with?";
+                  response = "🆘 **Here's how I work:**\n\nJust talk to me naturally! I can:\n• Check weather anywhere 🌤️\n• Get sports scores ⚽\n• Answer questions 💡\n• Have real conversations 💬\n• Remember our chat context 🧠\n\nNo special commands needed - just ask!\n\nWhat interests you?";
                   break;
                   
                 case 'MAIN_MENU':
-                  response = "🏠 **Main Menu**\n\nI can help with:\n• 🌤️ Weather forecasts\n• ⚽ Sports scores\n• 📰 News updates\n• 💡 General questions\n\nJust type what you need!";
+                  response = "🏠 Main Menu\n\nPopular things to try:\n• \"Weather in [city]\"\n• \"[Team name] score\"\n• \"Tell me about...\"\n• \"What's new with...\"\n\nOr just chat with me about anything! 😊";
                   break;
                   
                 default:
-                  response = "I'm here to help! What would you like to know?";
+                  response = "I'm here and ready to help! What's up? 😊";
               }
               
               await sendFacebookMessage(senderID, response);
-              console.log('Postback response sent');
 
             } catch (error) {
               console.error('Error handling postback:', error.message);
@@ -155,7 +179,7 @@ async function checkAndGetRealtimeData(message) {
   const lowerMsg = message.toLowerCase();
   
   // Weather detection
-  const weatherKeywords = ['weather', 'temperature', 'forecast', 'hot', 'cold', 'rain', 'sunny', 'climate'];
+  const weatherKeywords = ['weather', 'temperature', 'forecast', 'hot', 'cold', 'rain', 'sunny', 'climate', 'degrees'];
   if (weatherKeywords.some(keyword => lowerMsg.includes(keyword))) {
     const cityMatch = extractCity(message);
     if (cityMatch) {
@@ -165,26 +189,23 @@ async function checkAndGetRealtimeData(message) {
   }
   
   // Sports detection
-  const sportsKeywords = ['score', 'game', 'match', 'league', 'football', 'soccer', 'basketball', 'nba', 'nfl', 'premier league'];
+  const sportsKeywords = ['score', 'game', 'match', 'league', 'football', 'soccer', 'basketball', 'nba', 'nfl', 'premier league', 'won', 'lost', 'team'];
   if (sportsKeywords.some(keyword => lowerMsg.includes(keyword))) {
     const sportsData = await getSportsData(lowerMsg);
     if (sportsData) return sportsData;
   }
-  
-  // News detection (you can add news API if needed)
   
   return null;
 }
 
 // Extract city name from message
 function extractCity(message) {
-  // Common patterns: "weather in London", "London weather", "temperature in Paris"
   const patterns = [
-    /weather (?:in|for|at) ([a-zA-Z\s]+)/i,
-    /temperature (?:in|for|at) ([a-zA-Z\s]+)/i,
-    /forecast (?:in|for|at) ([a-zA-Z\s]+)/i,
+    /weather (?:in|for|at|of) ([a-zA-Z\s]+)/i,
+    /temperature (?:in|for|at|of) ([a-zA-Z\s]+)/i,
+    /forecast (?:in|for|at|of) ([a-zA-Z\s]+)/i,
+    /(?:what's|how's|whats|hows) (?:the )?weather (?:in|at|of) ([a-zA-Z\s]+)/i,
     /([a-zA-Z\s]+) weather/i,
-    /how'?s (?:the )?weather (?:in|at) ([a-zA-Z\s]+)/i
   ];
   
   for (const pattern of patterns) {
@@ -197,10 +218,10 @@ function extractCity(message) {
   return null;
 }
 
-// Get weather data (using Open-Meteo - completely free, no API key needed!)
+// Get weather data using Open-Meteo (completely free!)
 async function getWeatherData(city) {
   try {
-    // First, geocode the city name to get coordinates
+    // Geocode the city
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
     const geoResponse = await fetch(geoUrl);
     const geoData = await geoResponse.json();
@@ -213,22 +234,28 @@ async function getWeatherData(city) {
     const { latitude, longitude, name, country } = location;
     
     // Get weather data
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=auto`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto`;
     const weatherResponse = await fetch(weatherUrl);
     const weatherData = await weatherResponse.json();
     
     const current = weatherData.current;
+    const daily = weatherData.daily;
     const weatherCode = getWeatherDescription(current.weather_code);
+    const windDirection = getWindDirection(current.wind_direction_10m);
     
     return {
       type: 'weather',
       data: {
         location: `${name}, ${country}`,
-        temperature: `${Math.round(current.temperature_2m)}°C`,
-        humidity: `${current.relative_humidity_2m}%`,
-        wind_speed: `${Math.round(current.wind_speed_10m)} km/h`,
+        temperature: Math.round(current.temperature_2m),
+        feels_like: Math.round(current.apparent_temperature),
+        humidity: current.relative_humidity_2m,
+        wind_speed: Math.round(current.wind_speed_10m),
+        wind_direction: windDirection,
         condition: weatherCode,
-        timestamp: new Date().toLocaleString('en-US', { timeZone: 'auto' })
+        high: Math.round(daily.temperature_2m_max[0]),
+        low: Math.round(daily.temperature_2m_min[0]),
+        timestamp: new Date().toISOString()
       }
     };
   } catch (error) {
@@ -237,56 +264,37 @@ async function getWeatherData(city) {
   }
 }
 
-// Alternative: Weather using WeatherAPI.com (requires free API key)
-async function getWeatherDataAPI(city) {
-  if (!WEATHERAPI_KEY || WEATHERAPI_KEY === 'YOUR_WEATHERAPI_KEY') {
-    return null;
-  }
-  
-  try {
-    const url = `https://api.weatherapi.com/v1/current.json?key=${WEATHERAPI_KEY}&q=${encodeURIComponent(city)}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    if (data.error) return null;
-    
-    return {
-      type: 'weather',
-      data: {
-        location: `${data.location.name}, ${data.location.country}`,
-        temperature: `${data.current.temp_c}°C / ${data.current.temp_f}°F`,
-        condition: data.current.condition.text,
-        humidity: `${data.current.humidity}%`,
-        wind_speed: `${data.current.wind_kph} km/h`,
-        feels_like: `${data.current.feelslike_c}°C`,
-        timestamp: data.current.last_updated
-      }
-    };
-  } catch (error) {
-    console.error('Weather API error:', error);
-    return null;
-  }
-}
-
-// Get sports data using TheSportsDB (free tier)
+// Get sports data using TheSportsDB
 async function getSportsData(query) {
   try {
-    // Check for specific team or league mentions
-    const teamMatch = query.match(/(lakers|warriors|celtics|heat|bulls|knicks|nets|sixers)/i);
-    const leagueMatch = query.match(/(nba|premier league|la liga|bundesliga|serie a|champions league|nfl|nhl)/i);
+    const sportsDbKey = '3'; // Free tier key
     
-    if (teamMatch) {
-      // Get specific team's latest events
-      const team = teamMatch[1];
-      const url = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_KEY}/searchteams.php?t=${encodeURIComponent(team)}`;
+    // Check for specific team mentions
+    const teamPatterns = [
+      /lakers?/i, /warriors?/i, /celtics?/i, /heat/i, /bulls?/i, 
+      /knicks?/i, /nets?/i, /sixers?/i, /clippers?/i, /bucks?/i
+    ];
+    
+    let teamName = null;
+    for (const pattern of teamPatterns) {
+      const match = query.match(pattern);
+      if (match) {
+        teamName = match[0];
+        break;
+      }
+    }
+    
+    if (teamName) {
+      // Search for the team
+      const url = `https://www.thesportsdb.com/api/v1/json/${sportsDbKey}/searchteams.php?t=${encodeURIComponent(teamName)}`;
       const response = await fetch(url);
       const data = await response.json();
       
       if (data.teams && data.teams.length > 0) {
-        const teamInfo = data.teams[0];
+        const team = data.teams[0];
         
         // Get latest events for this team
-        const eventsUrl = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_KEY}/eventslast.php?id=${teamInfo.idTeam}`;
+        const eventsUrl = `https://www.thesportsdb.com/api/v1/json/${sportsDbKey}/eventslast.php?id=${team.idTeam}`;
         const eventsResponse = await fetch(eventsUrl);
         const eventsData = await eventsResponse.json();
         
@@ -295,11 +303,13 @@ async function getSportsData(query) {
           return {
             type: 'sports',
             data: {
-              team: teamInfo.strTeam,
-              league: teamInfo.strLeague,
+              team: team.strTeam,
+              league: team.strLeague,
+              sport: team.strSport,
               latest_game: {
                 event: latestEvent.strEvent,
                 date: latestEvent.dateEvent,
+                time: latestEvent.strTime,
                 home_team: latestEvent.strHomeTeam,
                 away_team: latestEvent.strAwayTeam,
                 home_score: latestEvent.intHomeScore,
@@ -312,11 +322,11 @@ async function getSportsData(query) {
       }
     }
     
-    // If no specific match, return general sports info available
+    // General sports response if no specific data found
     return {
       type: 'sports',
       data: {
-        message: "I can get sports scores! Try asking about specific teams like 'Lakers score' or 'Premier League standings'"
+        message: "I can get sports scores! Try asking about specific teams like 'Lakers', 'Warriors', or 'Premier League standings'"
       }
     };
     
@@ -329,39 +339,31 @@ async function getSportsData(query) {
 // Convert weather code to description
 function getWeatherDescription(code) {
   const weatherCodes = {
-    0: 'Clear sky',
-    1: 'Mainly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Foggy',
-    48: 'Depositing rime fog',
-    51: 'Light drizzle',
-    53: 'Moderate drizzle',
-    55: 'Dense drizzle',
-    61: 'Slight rain',
-    63: 'Moderate rain',
-    65: 'Heavy rain',
-    71: 'Slight snow',
-    73: 'Moderate snow',
-    75: 'Heavy snow',
+    0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+    45: 'Foggy', 48: 'Depositing rime fog',
+    51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle',
+    61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+    71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow',
     77: 'Snow grains',
-    80: 'Slight rain showers',
-    81: 'Moderate rain showers',
-    82: 'Violent rain showers',
-    85: 'Slight snow showers',
-    86: 'Heavy snow showers',
-    95: 'Thunderstorm',
-    96: 'Thunderstorm with slight hail',
-    99: 'Thunderstorm with heavy hail'
+    80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers',
+    85: 'Slight snow showers', 86: 'Heavy snow showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail'
   };
-  
   return weatherCodes[code] || 'Unknown';
 }
 
-// Call DeepSeek API with optional real-time data
-async function callDeepSeekAPI(userMessage, realtimeData = null) {
+// Convert wind direction degrees to cardinal direction
+function getWindDirection(degrees) {
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const index = Math.round(degrees / 45) % 8;
+  return directions[index];
+}
+
+// Call AI with conversation history and context
+async function callAI(userId, userMessage, realtimeData = null) {
   const url = 'https://openrouter.ai/api/v1/chat/completions';
 
+  // Get current date and time (dynamic, updates every request)
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -372,50 +374,102 @@ async function callDeepSeekAPI(userMessage, realtimeData = null) {
   const timeStr = now.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
+    hour12: true,
     timeZone: 'Asia/Baghdad'
   });
+  const hourOfDay = now.getHours();
 
-  let systemPrompt = `You are a helpful AI assistant with access to real-time data. Today is ${dateStr}, ${timeStr} (Iraq time).`;
-  
+  // Determine greeting based on time
+  let timeGreeting = '';
+  if (hourOfDay >= 5 && hourOfDay < 12) timeGreeting = 'morning';
+  else if (hourOfDay >= 12 && hourOfDay < 17) timeGreeting = 'afternoon';
+  else if (hourOfDay >= 17 && hourOfDay < 21) timeGreeting = 'evening';
+  else timeGreeting = 'night';
+
+  // Build dynamic system prompt
+  let systemPrompt = `You are a helpful, friendly, and intelligent AI assistant in 2026. 
+
+Current date and time: ${dateStr}, ${timeStr} (Iraq/Baghdad time)
+Time of day: ${timeGreeting}
+
+Your personality:
+- Warm, conversational, and helpful
+- Use natural language, not robotic
+- Add appropriate emojis when it feels natural
+- Remember context from the conversation
+- Be concise but thorough
+- Show genuine interest in helping
+
+Guidelines:
+- Keep responses conversational and engaging
+- Vary your responses - don't use the same phrases repeatedly
+- If you have real-time data, use it naturally in your response
+- Be accurate and honest about what you know and don't know
+- For current events beyond your knowledge, suggest checking latest sources
+- Make responses feel personal and contextual`;
+
   // Add real-time data context if available
   if (realtimeData) {
     if (realtimeData.type === 'weather') {
-      systemPrompt += `\n\nREAL-TIME WEATHER DATA:\nLocation: ${realtimeData.data.location}\nTemperature: ${realtimeData.data.temperature}\nCondition: ${realtimeData.data.condition}\nHumidity: ${realtimeData.data.humidity}\nWind Speed: ${realtimeData.data.wind_speed}\nLast Updated: ${realtimeData.data.timestamp}\n\nUse this data to answer the user's question accurately.`;
+      const w = realtimeData.data;
+      systemPrompt += `\n\n🌤️ REAL-TIME WEATHER DATA (just fetched):\nLocation: ${w.location}\nCurrent: ${w.temperature}°C (feels like ${w.feels_like}°C)\nCondition: ${w.condition}\nHumidity: ${w.humidity}%\nWind: ${w.wind_speed} km/h from ${w.wind_direction}\nToday's High/Low: ${w.high}°C / ${w.low}°C\n\nUse this fresh data to give a natural, helpful response. Add context about what this weather means (e.g., "Perfect for a walk!" or "Stay warm!").`;
     } else if (realtimeData.type === 'sports') {
-      systemPrompt += `\n\nREAL-TIME SPORTS DATA:\n${JSON.stringify(realtimeData.data, null, 2)}\n\nUse this data to answer the user's sports question.`;
+      const s = realtimeData.data;
+      systemPrompt += `\n\n⚽ REAL-TIME SPORTS DATA:\n${JSON.stringify(s, null, 2)}\n\nUse this data to give an engaging sports update.`;
     }
   }
-  
-  systemPrompt += `\n\nKeep responses SHORT and conversational. Format the information in a clear, friendly way.`;
 
+  // Get conversation history
+  const history = getConversationHistory(userId);
+  const messages = [
+    { role: 'system', content: systemPrompt }
+  ];
+
+  // Add recent conversation context (last 6 messages)
+  const recentHistory = history.slice(-6);
+  for (const msg of recentHistory) {
+    messages.push({
+      role: msg.role,
+      content: msg.content
+    });
+  }
+
+  // Add current user message
+  messages.push({ role: 'user', content: userMessage });
+
+  // Call the latest AI models from 2026
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://messenger-gemini-bot.vercel.app',
-      'X-Title': 'Messenger AI Bot Enhanced'
+      'HTTP-Referer': 'https://messenger-bot-2026.vercel.app',
+      'X-Title': 'Messenger AI Bot 2026'
     },
     body: JSON.stringify({
-      model: 'tngtech/deepseek-r1t2-chimera:free',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.7,
-      max_tokens: 1000
+      // Using the best free model auto-router from 2026
+      model: 'openrouter/free', // Auto-selects best free model: Trinity-Large, DeepSeek V3.2, GLM-4.5, etc.
+      messages: messages,
+      temperature: 0.8, // Slightly higher for more natural, varied responses
+      max_tokens: 1200,
+      top_p: 0.9
     })
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
     throw new Error(`AI error: ${response.status}`);
   }
 
   const data = await response.json();
   
   if (data.choices && data.choices[0] && data.choices[0].message) {
-    return data.choices[0].message.content;
+    const aiReply = data.choices[0].message.content;
+    
+    // Add to conversation history
+    addToHistory(userId, 'user', userMessage);
+    addToHistory(userId, 'assistant', aiReply);
+    
+    return aiReply;
   }
   
   throw new Error('No AI response');
@@ -435,7 +489,6 @@ async function sendFacebookMessage(recipientID, messageText) {
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
     throw new Error(`Facebook error: ${response.status}`);
   }
 
@@ -444,12 +497,16 @@ async function sendFacebookMessage(recipientID, messageText) {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('🤖 Enhanced AI Bot - DeepSeek R1T2 Chimera with Real-Time Data');
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  res.send(`🤖 Intelligent AI Bot 2026 - Running on ${dateStr}\n\nPowered by latest AI technology with real-time data access.`);
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Enhanced server running on port ${PORT}`);
+  console.log(`🚀 Intelligent Bot running on port ${PORT}`);
+  console.log(`📅 Date: ${new Date().toLocaleDateString('en-US')}`);
+  console.log(`⏰ Time: ${new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Baghdad' })}`);
 });
 
 module.exports = app;
