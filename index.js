@@ -264,7 +264,7 @@ async function getWeatherData(city) {
   }
 }
 
-// Get sports data using TheSportsDB
+// Get sports data using TheSportsDB - with limitations noted
 async function getSportsData(query) {
   try {
     const sportsDbKey = '3'; // Free tier key
@@ -272,7 +272,8 @@ async function getSportsData(query) {
     // Check for specific team mentions
     const teamPatterns = [
       /lakers?/i, /warriors?/i, /celtics?/i, /heat/i, /bulls?/i, 
-      /knicks?/i, /nets?/i, /sixers?/i, /clippers?/i, /bucks?/i
+      /knicks?/i, /nets?/i, /sixers?/i, /clippers?/i, /bucks?/i,
+      /barcelona/i, /real madrid/i, /manchester/i, /liverpool/i, /chelsea/i
     ];
     
     let teamName = null;
@@ -300,35 +301,34 @@ async function getSportsData(query) {
         
         if (eventsData.results && eventsData.results.length > 0) {
           const latestEvent = eventsData.results[0];
-          return {
-            type: 'sports',
-            data: {
-              team: team.strTeam,
-              league: team.strLeague,
-              sport: team.strSport,
-              latest_game: {
-                event: latestEvent.strEvent,
-                date: latestEvent.dateEvent,
-                time: latestEvent.strTime,
-                home_team: latestEvent.strHomeTeam,
-                away_team: latestEvent.strAwayTeam,
-                home_score: latestEvent.intHomeScore,
-                away_score: latestEvent.intAwayScore,
-                status: latestEvent.strStatus
+          
+          // Only return if we have actual scores (not future matches)
+          if (latestEvent.intHomeScore !== null && latestEvent.intAwayScore !== null) {
+            return {
+              type: 'sports',
+              data: {
+                team: team.strTeam,
+                league: team.strLeague,
+                sport: team.strSport,
+                latest_game: {
+                  event: latestEvent.strEvent,
+                  date: latestEvent.dateEvent,
+                  home_team: latestEvent.strHomeTeam,
+                  away_team: latestEvent.strAwayTeam,
+                  home_score: latestEvent.intHomeScore,
+                  away_score: latestEvent.intAwayScore,
+                  status: latestEvent.strStatus
+                },
+                note: "This data may be delayed. For live scores, check official sources."
               }
-            }
-          };
+            };
+          }
         }
       }
     }
     
-    // General sports response if no specific data found
-    return {
-      type: 'sports',
-      data: {
-        message: "I can get sports scores! Try asking about specific teams like 'Lakers', 'Warriors', or 'Premier League standings'"
-      }
-    };
+    // No valid data found - return null so AI doesn't make things up
+    return null;
     
   } catch (error) {
     console.error('Sports API error:', error);
@@ -400,11 +400,19 @@ Your personality:
 - Be concise but thorough
 - Show genuine interest in helping
 
+CRITICAL RULES:
+- NEVER make up sports scores, fixtures, or player statistics
+- NEVER invent match results or dates
+- If you don't have real-time sports data, be honest and say so
+- Suggest users check official sources like ESPN, BBC Sport, or team websites for accurate scores
+- Only provide sports information if it's explicitly given in the real-time data below
+- For weather, you can use the provided real-time data confidently
+- Be accurate and honest about what you know and don't know
+
 Guidelines:
 - Keep responses conversational and engaging
 - Vary your responses - don't use the same phrases repeatedly
 - If you have real-time data, use it naturally in your response
-- Be accurate and honest about what you know and don't know
 - For current events beyond your knowledge, suggest checking latest sources
 - Make responses feel personal and contextual`;
 
@@ -415,7 +423,11 @@ Guidelines:
       systemPrompt += `\n\n🌤️ REAL-TIME WEATHER DATA (just fetched):\nLocation: ${w.location}\nCurrent: ${w.temperature}°C (feels like ${w.feels_like}°C)\nCondition: ${w.condition}\nHumidity: ${w.humidity}%\nWind: ${w.wind_speed} km/h from ${w.wind_direction}\nToday's High/Low: ${w.high}°C / ${w.low}°C\n\nUse this fresh data to give a natural, helpful response. Add context about what this weather means (e.g., "Perfect for a walk!" or "Stay warm!").`;
     } else if (realtimeData.type === 'sports') {
       const s = realtimeData.data;
-      systemPrompt += `\n\n⚽ REAL-TIME SPORTS DATA:\n${JSON.stringify(s, null, 2)}\n\nUse this data to give an engaging sports update.`;
+      if (s.latest_game) {
+        systemPrompt += `\n\n⚽ REAL-TIME SPORTS DATA (may be delayed):\nTeam: ${s.team}\nLeague: ${s.league}\nLatest Game: ${s.latest_game.event}\nDate: ${s.latest_game.date}\nScore: ${s.latest_game.home_team} ${s.latest_game.home_score} - ${s.latest_game.away_score} ${s.latest_game.away_team}\nStatus: ${s.latest_game.status}\n\nIMPORTANT: This is the ONLY sports data available. Do NOT invent or predict future fixtures, upcoming matches, or player statistics. If asked about future games or other details, politely suggest checking ${s.team}'s official website or ESPN/BBC Sport.`;
+      } else {
+        systemPrompt += `\n\nSports data was requested but not available from the API. Politely tell the user you don't have access to live sports scores right now and suggest they check ESPN, BBC Sport, or the team's official website for accurate, up-to-date information.`;
+      }
     }
   }
 
