@@ -144,8 +144,10 @@ app.post('/webhook', async (req, res) => {
               // Check if football-related and get context
               let footballContext = '';
               if (FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
-                console.log('Football query detected, fetching data...');
+                console.log('🏃 Football query detected, fetching data...');
                 footballContext = await getFootballContext(userMessage);
+              } else if (!FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
+                console.log('⚠️ Football query detected but FOOTBALL_API_KEY not configured');
               }
 
               // Get AI response with conversation history and football data
@@ -296,14 +298,17 @@ function stopTyping(recipientID) {
 // FOOTBALL API INTEGRATION (Football-Data.org)
 // ============================================
 
-// Fetch football data from Football-Data.org
+// Fetch football data from Football-Data.org (IMPROVED VERSION)
 async function fetchFootballData(endpoint) {
   if (!FOOTBALL_API_KEY) {
+    console.error('❌ FOOTBALL_API_KEY not set in environment variables');
     return null;
   }
 
   try {
     const url = `https://api.football-data.org/v4/${endpoint}`;
+    console.log(`📡 Fetching football data: ${url}`);
+    
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -311,10 +316,18 @@ async function fetchFootballData(endpoint) {
       }
     });
 
-    if (!response.ok) return null;
-    return await response.json();
+    if (!response.ok) {
+      console.error(`❌ Football API error: ${response.status} ${response.statusText}`);
+      const errorBody = await response.text();
+      console.error(`Error details: ${errorBody}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    console.log(`✅ Football data received: ${data.matches?.length || 0} matches`);
+    return data;
   } catch (error) {
-    console.error('Football API error:', error.message);
+    console.error('❌ Football API network error:', error.message);
     return null;
   }
 }
@@ -324,7 +337,8 @@ async function getTodayMatches() {
   const data = await fetchFootballData('matches');
   
   if (!data || !data.matches || data.matches.length === 0) {
-    return "⚽ No matches found for today.";
+    console.log('⚽ No matches found for today');
+    return "⚽ No matches scheduled for today.";
   }
 
   let result = "⚽ **TODAY'S FOOTBALL:**\n\n";
@@ -365,6 +379,7 @@ async function getStandings(competitionCode) {
   const data = await fetchFootballData(`competitions/${competitionCode}/standings`);
   
   if (!data || !data.standings || data.standings.length === 0) {
+    console.log(`⚠️ Unable to get standings for ${competitionCode}`);
     return "Unable to get standings.";
   }
 
@@ -400,17 +415,24 @@ function isFootballQuery(message) {
   return footballKeywords.some(keyword => lowerMessage.includes(keyword));
 }
 
-// Get football context for AI
+// Get football context for AI (IMPROVED VERSION)
 async function getFootballContext(message) {
   const lowerMessage = message.toLowerCase();
   let context = '';
+
+  console.log(`🏃 Getting football context for: "${message}"`);
 
   // Get today's matches for most queries
   if (lowerMessage.includes('live') || lowerMessage.includes('today') || 
       lowerMessage.includes('tonight') || lowerMessage.includes('match') ||
       lowerMessage.includes('fixture') || lowerMessage.includes('score')) {
     const matchesData = await getTodayMatches();
-    context += matchesData + '\n\n';
+    if (matchesData) {
+      context += matchesData + '\n\n';
+      console.log('✅ Added matches data to context');
+    } else {
+      console.log('❌ No matches data available');
+    }
   }
 
   // Popular leagues with their codes
@@ -427,9 +449,18 @@ async function getFootballContext(message) {
     if (lowerMessage.includes(leagueName) && 
         (lowerMessage.includes('standing') || lowerMessage.includes('table'))) {
       const standingsData = await getStandings(code);
-      context += standingsData + '\n\n';
+      if (standingsData) {
+        context += standingsData + '\n\n';
+        console.log(`✅ Added ${leagueName} standings to context`);
+      } else {
+        console.log(`❌ No standings data for ${leagueName}`);
+      }
       break;
     }
+  }
+
+  if (!context) {
+    console.log('⚠️ No football context generated');
   }
 
   return context;
@@ -440,7 +471,7 @@ async function getFootballContext(message) {
 // ============================================
 
 
-// Call Gemini API with conversation history
+// Call Gemini API with conversation history (IMPROVED VERSION)
 async function callGeminiAPI(userID, userMessage, footballContext = '') {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
@@ -461,10 +492,18 @@ async function callGeminiAPI(userID, userMessage, footballContext = '') {
 
 Keep responses SHORT and conversational. You can reference previous messages in this conversation.`;
 
-  // Add football data if available
-  if (footballContext) {
+  // Add football data if available (IMPROVED LOGIC)
+  if (footballContext && footballContext.trim().length > 0 && !footballContext.includes('No matches')) {
+    console.log('✅ Adding football context to AI prompt');
     systemPrompt += `\n\n**LIVE FOOTBALL DATA (Real-time):**\n${footballContext}\n\nUse this REAL data to answer football questions. This is current and accurate.`;
+  } else if (footballContext && footballContext.includes('No matches')) {
+    console.log('⚠️ Football context shows no matches available');
+    systemPrompt += `\n\nNote: Football data API is working but there are no matches scheduled right now. Inform the user politely.`;
+  } else if (FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
+    console.log('⚠️ Football query but no context generated - API might have failed');
+    systemPrompt += `\n\nNote: Football data API had an issue fetching data. Inform the user politely that you couldn't get live data right now.`;
   } else {
+    console.log('ℹ️ No football context needed for this query');
     systemPrompt += `\n\nFor football/sports info, note that you don't have access to live scores or recent data.`;
   }
 
@@ -546,22 +585,28 @@ async function sendFacebookMessage(recipientID, messageText) {
 // Health check
 app.get('/', (req, res) => {
   const stats = conversationManager.getStats();
+  const apiStatus = FOOTBALL_API_KEY ? '✅ Configured' : '❌ Not Set';
   res.send(`🤖 AI Bot - Google Gemini 2.5 Flash-Lite
   
 🧠 Memory Enabled
+⚽ Football API: ${apiStatus}
 📊 Active conversations: ${stats.activeConversations}
 💬 Total messages stored: ${stats.totalMessages}`);
 });
 
 // Stats endpoint (for monitoring)
 app.get('/stats', (req, res) => {
-  res.json(conversationManager.getStats());
+  res.json({
+    ...conversationManager.getStats(),
+    footballApiConfigured: !!FOOTBALL_API_KEY
+  });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('🧠 Conversation memory enabled');
+  console.log(`⚽ Football API: ${FOOTBALL_API_KEY ? 'CONFIGURED ✅' : 'NOT SET ❌'}`);
 });
 
 module.exports = app;
