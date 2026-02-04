@@ -143,11 +143,19 @@ app.post('/webhook', async (req, res) => {
 
               // Check if football-related and get context
               let footballContext = '';
-              if (FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
-                console.log('🏃 Football query detected, fetching data...');
-                footballContext = await getFootballContext(userMessage);
-              } else if (!FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
-                console.log('⚠️ Football query detected but FOOTBALL_API_KEY not configured');
+              if (isFootballQuery(userMessage)) {
+                if (FOOTBALL_API_KEY) {
+                  console.log('🏃 Football query detected, fetching data...');
+                  try {
+                    footballContext = await getFootballContext(userMessage);
+                  } catch (apiError) {
+                    console.error('⚠️ Football API failed:', apiError.message);
+                    // Continue without football data - don't crash the bot
+                    footballContext = '';
+                  }
+                } else {
+                  console.log('⚠️ Football query detected but FOOTBALL_API_KEY not configured');
+                }
               }
 
               // Get AI response with conversation history and football data
@@ -400,19 +408,44 @@ async function getStandings(competitionCode) {
   return result;
 }
 
-// Detect if message is football-related
+// Detect if message is football-related (IMPROVED - Less sensitive)
 function isFootballQuery(message) {
-  const footballKeywords = [
-    'football', 'soccer', 'match', 'game', 'score', 'live', 'fixture',
-    'premier league', 'la liga', 'serie a', 'bundesliga', 'ligue 1',
-    'champions league', 'uefa', 'fifa', 'world cup', 'team', 'player',
-    'goal', 'league', 'standing', 'table', 'barcelona', 'real madrid',
-    'manchester', 'liverpool', 'chelsea', 'arsenal', 'psg', 'bayern',
-    'juventus', 'milan', 'messi', 'ronaldo', 'today match', 'tonight'
+  const lowerMessage = message.toLowerCase();
+  
+  // Strong football indicators - these clearly mean football
+  const strongKeywords = [
+    'football', 'soccer', 'premier league', 'la liga', 'serie a', 
+    'bundesliga', 'ligue 1', 'champions league', 'uefa', 'fifa', 
+    'world cup', 'barcelona', 'real madrid', 'manchester united',
+    'manchester city', 'liverpool', 'chelsea', 'arsenal', 'psg', 
+    'bayern', 'juventus', 'milan', 'messi', 'ronaldo', 'neymar',
+    'football match', 'soccer match', 'football game', 'soccer game',
+    'football score', 'soccer score', 'football live', 'soccer live',
+    'league table', 'league standing', 'football fixture', 'soccer fixture',
+    'football team', 'soccer team', 'football stadium', 'soccer stadium'
   ];
   
-  const lowerMessage = message.toLowerCase();
-  return footballKeywords.some(keyword => lowerMessage.includes(keyword));
+  // Check for strong keywords first
+  if (strongKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    return true;
+  }
+  
+  // Context-based detection - only if combined with football context
+  const weakKeywords = ['match', 'score', 'live', 'fixture', 'standing', 'table', 'goal'];
+  const footballContext = ['tonight', 'today', 'game', 'team', 'league', 'player'];
+  
+  // Only trigger if we have BOTH a weak keyword AND football context
+  const hasWeakKeyword = weakKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasFootballContext = footballContext.some(keyword => lowerMessage.includes(keyword));
+  
+  // Additional check: mentions specific team/league patterns
+  const teamPattern = /\b(fc|united|city|athletic|real|inter)\b/i;
+  
+  if (hasWeakKeyword && (hasFootballContext || teamPattern.test(message))) {
+    return true;
+  }
+  
+  return false;
 }
 
 // Get football context for AI (IMPROVED VERSION)
