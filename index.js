@@ -10,7 +10,6 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-
 // ============================================
 // CONVERSATION MEMORY SYSTEM
 // ============================================
@@ -105,24 +104,15 @@ app.get('/webhook', (req, res) => {
 
 // Receive messages and postbacks
 app.post('/webhook', async (req, res) => {
-  console.log('═══════════════════════════════════════');
-  console.log('📥 WEBHOOK POST RECEIVED');
-  console.log('Time:', new Date().toISOString());
-  
   try {
     const body = req.body;
-    console.log('Request body:', JSON.stringify(body, null, 2));
+    console.log('Webhook received');
 
     if (body.object === 'page') {
-      console.log('✅ Valid page object');
-      
       for (const entry of body.entry) {
         const pageID = entry.id;
-        console.log(`📄 Processing entry for page: ${pageID}`);
         
         for (const event of entry.messaging) {
-          console.log('📨 Event type:', Object.keys(event).join(', '));
-          
           // Handle regular messages
           if (event.message && 
               event.message.text && 
@@ -133,63 +123,40 @@ app.post('/webhook', async (req, res) => {
             const senderID = event.sender.id;
             const userMessage = event.message.text;
 
-            console.log('═══════════════════════════════════════');
-            console.log(`👤 Message from user: ${senderID}`);
-            console.log(`💬 Message text: "${userMessage}"`);
-            console.log('═══════════════════════════════════════');
+            console.log(`Message from ${senderID}: ${userMessage}`);
 
             try {
-              console.log('✅ Starting to process message...');
-              
-              // Start typing indicator (will repeat every 5s)
-              startTyping(senderID);
-              console.log('⌨️ Typing indicator started');
+              sendTypingIndicator(senderID, true).catch(() => {});
 
               // Check for special commands
               if (userMessage.toLowerCase() === '/clear' || userMessage.toLowerCase() === '/reset') {
-                console.log('🔄 Clear command detected');
                 conversationManager.clearConversation(senderID);
                 await sendFacebookMessage(senderID, "🔄 Conversation cleared! Let's start fresh. What would you like to talk about?");
-                console.log('✅ Clear command completed');
                 continue;
               }
 
               // Add user message to history
-              console.log('💾 Adding message to history...');
               conversationManager.addMessage(senderID, 'user', userMessage);
 
               // Get AI response with conversation history
-              console.log('🤖 Calling Gemini API...');
               const aiReply = await callGeminiAPI(senderID, userMessage);
-              console.log(`✅ Gemini response received: "${aiReply.substring(0, 50)}..."`);
+              console.log('Gemini response received');
 
               // Add AI response to history
-              console.log('💾 Adding AI response to history...');
               conversationManager.addMessage(senderID, 'assistant', aiReply);
 
-              console.log('📤 Sending message to Facebook...');
               await sendFacebookMessage(senderID, aiReply);
-              console.log('✅ Message sent successfully!');
+              console.log('Message sent successfully');
 
             } catch (error) {
-              console.error('❌ ERROR in message processing:');
-              console.error('Error message:', error.message);
-              console.error('Error stack:', error.stack);
-              console.error('Error type:', error.name);
-              
+              console.error('Error:', error.message);
               try {
-                console.log('⚠️ Attempting to send error message to user...');
                 await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
-                console.log('✅ Error message sent');
               } catch (sendError) {
-                console.error('❌ Failed to send error message:', sendError.message);
-                console.error('Send error stack:', sendError.stack);
+                console.error('Failed to send error:', sendError.message);
               }
             } finally {
-              // Always stop typing indicator
-              console.log('🛑 Stopping typing indicator...');
-              stopTyping(senderID);
-              console.log('═══════════════════════════════════════');
+              sendTypingIndicator(senderID, false).catch(() => {});
             }
           }
           
@@ -198,14 +165,9 @@ app.post('/webhook', async (req, res) => {
             const senderID = event.sender.id;
             const payload = event.postback.payload;
 
-            console.log('═══════════════════════════════════════');
-            console.log(`🔘 Postback from ${senderID}: ${payload}`);
-            console.log('═══════════════════════════════════════');
+            console.log(`Postback from ${senderID}: ${payload}`);
 
             try {
-              // Show typing for postback responses too
-              startTyping(senderID);
-              
               let response = '';
               
               switch(payload) {
@@ -224,7 +186,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I'm here 24/7!\n\nWhat can I help you with?";
+                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I can't access real-time info (sports scores, news)\n• I'm here 24/7!\n\nWhat can I help you with?";
                   break;
                   
                 case 'MAIN_MENU':
@@ -245,38 +207,25 @@ app.post('/webhook', async (req, res) => {
 
             } catch (error) {
               console.error('Error handling postback:', error.message);
-            } finally {
-              stopTyping(senderID);
             }
           }
         }
       }
-    } else {
-      console.log('⚠️ Not a page object:', body.object);
     }
 
-    console.log('✅ Sending 200 response to Facebook');
     res.status(200).send('EVENT_RECEIVED');
-    console.log('═══════════════════════════════════════');
 
   } catch (error) {
-    console.error('═══════════════════════════════════════');
-    console.error('❌ WEBHOOK ERROR');
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('═══════════════════════════════════════');
+    console.error('Webhook error:', error.message);
     res.status(500).send('ERROR');
   }
 });
 
 // ============================================
-// TYPING INDICATOR SYSTEM
+// HELPER FUNCTIONS
 // ============================================
 
-// Active typing intervals per user
-const typingIntervals = new Map();
-
-// Send typing indicator (single)
+// Typing indicator
 async function sendTypingIndicator(recipientID, isTyping) {
   try {
     await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
@@ -292,49 +241,8 @@ async function sendTypingIndicator(recipientID, isTyping) {
   }
 }
 
-// Start continuous typing indicator (repeats every 5 seconds)
-function startTyping(recipientID) {
-  // Clear any existing interval
-  stopTyping(recipientID);
-  
-  // Send initial typing indicator
-  sendTypingIndicator(recipientID, true).catch(() => {});
-  
-  // Keep sending every 5 seconds (Facebook's typing indicator lasts ~20 seconds)
-  const interval = setInterval(() => {
-    sendTypingIndicator(recipientID, true).catch(() => {});
-  }, 5000);
-  
-  typingIntervals.set(recipientID, interval);
-}
-
-// Stop typing indicator
-function stopTyping(recipientID) {
-  // Clear interval if exists
-  if (typingIntervals.has(recipientID)) {
-    clearInterval(typingIntervals.get(recipientID));
-    typingIntervals.delete(recipientID);
-  }
-  
-  // Send typing off
-  sendTypingIndicator(recipientID, false).catch(() => {});
-}
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-
 // Call Gemini API with conversation history
 async function callGeminiAPI(userID, userMessage) {
-  console.log('🔵 callGeminiAPI started');
-  console.log(`   User ID: ${userID}`);
-  console.log(`   Message: "${userMessage}"`);
-  
-  if (!GEMINI_API_KEY) {
-    console.error('❌ GEMINI_API_KEY is not set!');
-    throw new Error('Gemini API key not configured');
-  }
-  
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
   const now = new Date();
@@ -350,14 +258,12 @@ async function callGeminiAPI(userID, userMessage) {
     timeZone: 'Asia/Baghdad'
   });
 
-  let systemPrompt = `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
+  const systemPrompt = `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
 
-Keep responses SHORT and conversational. You can reference previous messages in this conversation.`;
+Keep responses SHORT and conversational. You can reference previous messages in this conversation. If asked about real-time info (sports scores, news), politely say you can't access live data.`;
 
   // Get conversation history
-  console.log('📚 Getting conversation history...');
   const history = conversationManager.getHistory(userID);
-  console.log(`   History length: ${history.length} messages`);
 
   // Build contents array with history for Gemini
   const historyForGemini = [];
@@ -377,99 +283,54 @@ Keep responses SHORT and conversational. You can reference previous messages in 
     parts: [{ text: userMessage }]
   });
 
-  console.log(`📦 Prepared ${historyForGemini.length} messages for Gemini`);
-  console.log('🌐 Calling Gemini API...');
-  
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        },
-        contents: historyForGemini,
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1000
-        }
-      })
-    });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: systemPrompt }]
+      },
+      contents: historyForGemini,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1000
+      }
+    })
+  });
 
-    console.log(`📡 Gemini API response status: ${response.status}`);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Gemini API error: ${response.status}`);
-      console.error(`Error response: ${errorText}`);
-      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    console.log('✅ Gemini API response parsed successfully');
-    
-    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-      const reply = data.candidates[0].content.parts[0].text;
-      console.log(`✅ Got reply: "${reply.substring(0, 100)}..."`);
-      return reply;
-    }
-    
-    console.error('❌ No valid response from Gemini');
-    console.error('Response data:', JSON.stringify(data, null, 2));
-    throw new Error('No Gemini response');
-    
-  } catch (fetchError) {
-    console.error('❌ Fetch error in callGeminiAPI:');
-    console.error('Error message:', fetchError.message);
-    console.error('Error stack:', fetchError.stack);
-    throw fetchError;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
   }
+
+  const data = await response.json();
+  
+  if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+    return data.candidates[0].content.parts[0].text;
+  }
+  
+  throw new Error('No Gemini response');
 }
 
 // Send message to Facebook
 async function sendFacebookMessage(recipientID, messageText) {
-  console.log('📤 sendFacebookMessage called');
-  console.log(`   Recipient: ${recipientID}`);
-  console.log(`   Message: "${messageText.substring(0, 100)}..."`);
-  
-  if (!PAGE_ACCESS_TOKEN) {
-    console.error('❌ PAGE_ACCESS_TOKEN is not set!');
-    throw new Error('Facebook access token not configured');
-  }
-  
   const url = `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
 
-  console.log('🌐 Sending to Facebook API...');
-  
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipient: { id: recipientID },
-        message: { text: messageText }
-      })
-    });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: recipientID },
+      message: { text: messageText }
+    })
+  });
 
-    console.log(`📡 Facebook API response status: ${response.status}`);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Facebook API error: ${response.status}`);
-      console.error(`Error response: ${errorText}`);
-      throw new Error(`Facebook error: ${response.status} - ${errorText}`);
-    }
-
-    const result = await response.json();
-    console.log('✅ Message sent to Facebook successfully');
-    return result;
-    
-  } catch (fetchError) {
-    console.error('❌ Error in sendFacebookMessage:');
-    console.error('Error message:', fetchError.message);
-    console.error('Error stack:', fetchError.stack);
-    throw fetchError;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Facebook error: ${response.status}`);
   }
+
+  return await response.json();
 }
 
 // ============================================
@@ -493,21 +354,8 @@ app.get('/stats', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('═══════════════════════════════════════');
-  console.log('🚀 SERVER STARTING');
-  console.log('═══════════════════════════════════════');
-  console.log(`📍 Port: ${PORT}`);
-  console.log(`🕐 Time: ${new Date().toISOString()}`);
-  console.log('');
-  console.log('🔑 ENVIRONMENT VARIABLES STATUS:');
-  console.log(`   PAGE_ACCESS_TOKEN: ${PAGE_ACCESS_TOKEN ? '✅ SET' : '❌ NOT SET'}`);
-  console.log(`   VERIFY_TOKEN: ${VERIFY_TOKEN ? '✅ SET' : '❌ NOT SET'}`);
-  console.log(`   GEMINI_API_KEY: ${GEMINI_API_KEY ? '✅ SET' : '❌ NOT SET'}`);
-  console.log('');
-  console.log('🧠 Conversation memory: ENABLED');
-  console.log('');
-  console.log('✅ Server ready to receive messages');
-  console.log('═══════════════════════════════════════');
+  console.log(`Server running on port ${PORT}`);
+  console.log('🧠 Conversation memory enabled');
 });
 
 module.exports = app;
