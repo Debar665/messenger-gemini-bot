@@ -32,25 +32,30 @@ app.post('/webhook', async (req, res) => {
     if (body.object === 'page') {
       for (const entry of body.entry) {
         for (const event of entry.messaging) {
-          // Ignore echo messages
-          if (event.message && event.message.text && !event.message.is_echo) {
+          // Ignore echo messages AND page messages
+          if (event.message && event.message.text && !event.message.is_echo && event.sender && event.recipient) {
             const senderID = event.sender.id;
-            const userMessage = event.message.text;
+            const recipientID = event.recipient.id;
+            
+            // Only respond if sender is NOT the page (user is messaging the page)
+            if (senderID !== recipientID) {
+              const userMessage = event.message.text;
 
-            console.log(`Message from ${senderID}: ${userMessage}`);
+              console.log(`Message from user ${senderID}: ${userMessage}`);
 
-            try {
-              // Call DeepSeek V3.1 via OpenRouter
-              const aiReply = await callDeepSeekAPI(userMessage);
-              console.log('DeepSeek response received');
+              try {
+                // Call DeepSeek R1T2 Chimera via OpenRouter (FREE & SMART!)
+                const aiReply = await callDeepSeekAPI(userMessage);
+                console.log('DeepSeek response received');
 
-              // Send reply to Facebook
-              await sendFacebookMessage(senderID, aiReply);
-              console.log('Message sent successfully');
+                // Send reply to Facebook
+                await sendFacebookMessage(senderID, aiReply);
+                console.log('Message sent successfully');
 
-            } catch (error) {
-              console.error('Error processing message:', error);
-              await sendFacebookMessage(senderID, 'Sorry, I encountered an error. Please try again.');
+              } catch (error) {
+                console.error('Error processing message:', error);
+                await sendFacebookMessage(senderID, 'Sorry, I encountered an error. Please try again.');
+              }
             }
           }
         }
@@ -65,7 +70,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Function to call DeepSeek V3.1 via OpenRouter
+// Function to call DeepSeek R1T2 Chimera via OpenRouter (FREE!)
 async function callDeepSeekAPI(userMessage) {
   const url = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -78,7 +83,7 @@ async function callDeepSeekAPI(userMessage) {
       'X-Title': 'Messenger AI Bot'
     },
     body: JSON.stringify({
-      model: 'deepseek/deepseek-chat-v3.1:free',
+      model: 'tngtech/deepseek-r1t2-chimera:free',  // CORRECT FREE MODEL!
       messages: [{
         role: 'user',
         content: userMessage
@@ -127,7 +132,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('Bot is running with DeepSeek V3.1!');
+  res.send('Bot is running with DeepSeek R1T2 Chimera - FREE & SMART!');
 });
 
 const PORT = process.env.PORT || 3000;
