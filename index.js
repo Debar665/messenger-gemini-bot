@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 // Load from environment variables
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 // ============================================
 // CONVERSATION MEMORY SYSTEM
@@ -139,8 +139,8 @@ app.post('/webhook', async (req, res) => {
               conversationManager.addMessage(senderID, 'user', userMessage);
 
               // Get AI response with conversation history
-              const aiReply = await callGeminiAPI(senderID, userMessage);
-              console.log('Gemini response received');
+              const aiReply = await callOpenRouterAPI(senderID, userMessage);
+              console.log('OpenRouter response received');
 
               // Add AI response to history
               conversationManager.addMessage(senderID, 'assistant', aiReply);
@@ -178,7 +178,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'ABOUT_BOT':
-                  response = "🤖 I'm an AI assistant powered by Google Gemini 2.5 Flash-Lite.\n\n🧠 **New Feature:** I now remember our conversation! This means:\n• I can refer back to what we discussed\n• You can ask follow-up questions\n• Context is preserved\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
+                  response = "🤖 I'm an AI assistant powered by OpenRouter.\n\n🧠 **New Feature:** I now remember our conversation! This means:\n• I can refer back to what we discussed\n• You can ask follow-up questions\n• Context is preserved\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
                   break;
                   
                 case 'START_CHAT':
@@ -241,9 +241,13 @@ async function sendTypingIndicator(recipientID, isTyping) {
   }
 }
 
-// Call Gemini API with conversation history
-async function callGeminiAPI(userID, userMessage) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+// Call OpenRouter API with conversation history
+async function callOpenRouterAPI(userID, userMessage) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('OpenRouter API key not configured');
+  }
+
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
 
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
@@ -258,58 +262,64 @@ async function callGeminiAPI(userID, userMessage) {
     timeZone: 'Asia/Baghdad'
   });
 
-  const systemPrompt = `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
+  // System message
+  const systemMessage = {
+    role: 'system',
+    content: `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
 
-Keep responses SHORT and conversational. You can reference previous messages in this conversation. If asked about real-time info (sports scores, news), politely say you can't access live data.`;
+Keep responses SHORT and conversational. You can reference previous messages in this conversation. If asked about real-time info (sports scores, news), politely say you can't access live data.`
+  };
 
   // Get conversation history
   const history = conversationManager.getHistory(userID);
 
-  // Build contents array with history for Gemini
-  const historyForGemini = [];
+  // Build messages array with history
+  const messages = [systemMessage];
   
   // Add previous messages (excluding current one since we'll add it separately)
   for (let i = 0; i < history.length - 1; i++) {
     const msg = history[i];
-    historyForGemini.push({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
+    messages.push({
+      role: msg.role,
+      content: msg.content
     });
   }
 
   // Add current user message
-  historyForGemini.push({
+  messages.push({
     role: 'user',
-    parts: [{ text: userMessage }]
+    content: userMessage
   });
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/yourusername/messenger-bot', // Optional
+      'X-Title': 'Messenger AI Bot' // Optional
+    },
     body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
-      },
-      contents: historyForGemini,
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1000
-      }
+      model: 'meta-llama/llama-3.1-8b-instruct:free', // Free model
+      messages: messages,
+      temperature: 0.7,
+      max_tokens: 1000
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    console.error('OpenRouter API error:', errorText);
+    throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   
-  if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-    return data.candidates[0].content.parts[0].text;
+  if (data.choices && data.choices[0] && data.choices[0].message) {
+    return data.choices[0].message.content;
   }
   
-  throw new Error('No Gemini response');
+  throw new Error('No response from OpenRouter');
 }
 
 // Send message to Facebook
@@ -340,7 +350,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 // Health check
 app.get('/', (req, res) => {
   const stats = conversationManager.getStats();
-  res.send(`🤖 AI Bot - Google Gemini 2.5 Flash-Lite
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)
   
 🧠 Memory Enabled
 📊 Active conversations: ${stats.activeConversations}
@@ -356,6 +366,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('🧠 Conversation memory enabled');
+  console.log(`🤖 Using OpenRouter API: ${OPENROUTER_API_KEY ? 'Configured ✅' : 'NOT SET ❌'}`);
 });
 
 module.exports = app;
