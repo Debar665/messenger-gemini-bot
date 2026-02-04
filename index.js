@@ -9,8 +9,7 @@ app.use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY; // Add this to Vercel env vars
-const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY; // Add to Vercel env vars
+
 
 // ============================================
 // CONVERSATION MEMORY SYSTEM
@@ -106,15 +105,24 @@ app.get('/webhook', (req, res) => {
 
 // Receive messages and postbacks
 app.post('/webhook', async (req, res) => {
+  console.log('═══════════════════════════════════════');
+  console.log('📥 WEBHOOK POST RECEIVED');
+  console.log('Time:', new Date().toISOString());
+  
   try {
     const body = req.body;
-    console.log('Webhook received');
+    console.log('Request body:', JSON.stringify(body, null, 2));
 
     if (body.object === 'page') {
+      console.log('✅ Valid page object');
+      
       for (const entry of body.entry) {
         const pageID = entry.id;
+        console.log(`📄 Processing entry for page: ${pageID}`);
         
         for (const event of entry.messaging) {
+          console.log('📨 Event type:', Object.keys(event).join(', '));
+          
           // Handle regular messages
           if (event.message && 
               event.message.text && 
@@ -125,49 +133,63 @@ app.post('/webhook', async (req, res) => {
             const senderID = event.sender.id;
             const userMessage = event.message.text;
 
-            console.log(`Message from ${senderID}: ${userMessage}`);
+            console.log('═══════════════════════════════════════');
+            console.log(`👤 Message from user: ${senderID}`);
+            console.log(`💬 Message text: "${userMessage}"`);
+            console.log('═══════════════════════════════════════');
 
             try {
+              console.log('✅ Starting to process message...');
+              
               // Start typing indicator (will repeat every 5s)
               startTyping(senderID);
+              console.log('⌨️ Typing indicator started');
 
               // Check for special commands
               if (userMessage.toLowerCase() === '/clear' || userMessage.toLowerCase() === '/reset') {
+                console.log('🔄 Clear command detected');
                 conversationManager.clearConversation(senderID);
                 await sendFacebookMessage(senderID, "🔄 Conversation cleared! Let's start fresh. What would you like to talk about?");
+                console.log('✅ Clear command completed');
                 continue;
               }
 
               // Add user message to history
+              console.log('💾 Adding message to history...');
               conversationManager.addMessage(senderID, 'user', userMessage);
 
-              // Check if football-related and get context
-              let footballContext = '';
-              if (FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
-                console.log('Football query detected, fetching data...');
-                footballContext = await getFootballContext(userMessage);
-              }
-
-              // Get AI response with conversation history and football data
-              const aiReply = await callGeminiAPI(senderID, userMessage, footballContext);
-              console.log('Gemini response received');
+              // Get AI response with conversation history
+              console.log('🤖 Calling Gemini API...');
+              const aiReply = await callGeminiAPI(senderID, userMessage);
+              console.log(`✅ Gemini response received: "${aiReply.substring(0, 50)}..."`);
 
               // Add AI response to history
+              console.log('💾 Adding AI response to history...');
               conversationManager.addMessage(senderID, 'assistant', aiReply);
 
+              console.log('📤 Sending message to Facebook...');
               await sendFacebookMessage(senderID, aiReply);
-              console.log('Message sent successfully');
+              console.log('✅ Message sent successfully!');
 
             } catch (error) {
-              console.error('Error:', error.message);
+              console.error('❌ ERROR in message processing:');
+              console.error('Error message:', error.message);
+              console.error('Error stack:', error.stack);
+              console.error('Error type:', error.name);
+              
               try {
+                console.log('⚠️ Attempting to send error message to user...');
                 await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
+                console.log('✅ Error message sent');
               } catch (sendError) {
-                console.error('Failed to send error:', sendError.message);
+                console.error('❌ Failed to send error message:', sendError.message);
+                console.error('Send error stack:', sendError.stack);
               }
             } finally {
               // Always stop typing indicator
+              console.log('🛑 Stopping typing indicator...');
               stopTyping(senderID);
+              console.log('═══════════════════════════════════════');
             }
           }
           
@@ -176,7 +198,9 @@ app.post('/webhook', async (req, res) => {
             const senderID = event.sender.id;
             const payload = event.postback.payload;
 
-            console.log(`Postback from ${senderID}: ${payload}`);
+            console.log('═══════════════════════════════════════');
+            console.log(`🔘 Postback from ${senderID}: ${payload}`);
+            console.log('═══════════════════════════════════════');
 
             try {
               // Show typing for postback responses too
@@ -200,7 +224,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I can't access real-time info (sports scores, news)\n• I'm here 24/7!\n\nWhat can I help you with?";
+                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I'm here 24/7!\n\nWhat can I help you with?";
                   break;
                   
                 case 'MAIN_MENU':
@@ -227,19 +251,23 @@ app.post('/webhook', async (req, res) => {
           }
         }
       }
+    } else {
+      console.log('⚠️ Not a page object:', body.object);
     }
 
+    console.log('✅ Sending 200 response to Facebook');
     res.status(200).send('EVENT_RECEIVED');
+    console.log('═══════════════════════════════════════');
 
   } catch (error) {
-    console.error('Webhook error:', error.message);
+    console.error('═══════════════════════════════════════');
+    console.error('❌ WEBHOOK ERROR');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('═══════════════════════════════════════');
     res.status(500).send('ERROR');
   }
 });
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
 
 // ============================================
 // TYPING INDICATOR SYSTEM
@@ -293,155 +321,20 @@ function stopTyping(recipientID) {
 }
 
 // ============================================
-// FOOTBALL API INTEGRATION (Football-Data.org)
-// ============================================
-
-// Fetch football data from Football-Data.org
-async function fetchFootballData(endpoint) {
-  if (!FOOTBALL_API_KEY) {
-    return null;
-  }
-
-  try {
-    const url = `https://api.football-data.org/v4/${endpoint}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-Auth-Token': FOOTBALL_API_KEY
-      }
-    });
-
-    if (!response.ok) return null;
-    return await response.json();
-  } catch (error) {
-    console.error('Football API error:', error.message);
-    return null;
-  }
-}
-
-// Get live/today's matches
-async function getTodayMatches() {
-  const data = await fetchFootballData('matches');
-  
-  if (!data || !data.matches || data.matches.length === 0) {
-    return "⚽ No matches found for today.";
-  }
-
-  let result = "⚽ **TODAY'S FOOTBALL:**\n\n";
-  const matches = data.matches.slice(0, 15);
-
-  matches.forEach(match => {
-    const home = match.homeTeam.name || match.homeTeam.shortName;
-    const away = match.awayTeam.name || match.awayTeam.shortName;
-    const competition = match.competition.name;
-    const status = match.status;
-
-    if (status === 'FINISHED') {
-      const scoreHome = match.score.fullTime.home;
-      const scoreAway = match.score.fullTime.away;
-      result += `✅ ${home} ${scoreHome} - ${scoreAway} ${away}\n`;
-      result += `   ${competition} (Final)\n\n`;
-    } else if (status === 'IN_PLAY' || status === 'PAUSED') {
-      const scoreHome = match.score.fullTime.home || 0;
-      const scoreAway = match.score.fullTime.away || 0;
-      result += `🔴 LIVE: ${home} ${scoreHome} - ${scoreAway} ${away}\n`;
-      result += `   ${competition}\n\n`;
-    } else {
-      const time = new Date(match.utcDate).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Baghdad'
-      });
-      result += `🕐 ${time} - ${home} vs ${away}\n`;
-      result += `   ${competition}\n\n`;
-    }
-  });
-
-  return result;
-}
-
-// Get league standings
-async function getStandings(competitionCode) {
-  const data = await fetchFootballData(`competitions/${competitionCode}/standings`);
-  
-  if (!data || !data.standings || data.standings.length === 0) {
-    return "Unable to get standings.";
-  }
-
-  const standings = data.standings[0].table;
-  const competition = data.competition.name;
-  
-  let result = `🏆 **${competition.toUpperCase()}:**\n\n`;
-  
-  standings.slice(0, 10).forEach(team => {
-    const pos = team.position;
-    const name = team.team.shortName || team.team.name;
-    const points = team.points;
-    const played = team.playedGames;
-    
-    result += `${pos}. ${name} - ${points} pts (${played} games)\n`;
-  });
-
-  return result;
-}
-
-// Detect if message is football-related
-function isFootballQuery(message) {
-  const footballKeywords = [
-    'football', 'soccer', 'match', 'game', 'score', 'live', 'fixture',
-    'premier league', 'la liga', 'serie a', 'bundesliga', 'ligue 1',
-    'champions league', 'uefa', 'fifa', 'world cup', 'team', 'player',
-    'goal', 'league', 'standing', 'table', 'barcelona', 'real madrid',
-    'manchester', 'liverpool', 'chelsea', 'arsenal', 'psg', 'bayern',
-    'juventus', 'milan', 'messi', 'ronaldo', 'today match', 'tonight'
-  ];
-  
-  const lowerMessage = message.toLowerCase();
-  return footballKeywords.some(keyword => lowerMessage.includes(keyword));
-}
-
-// Get football context for AI
-async function getFootballContext(message) {
-  const lowerMessage = message.toLowerCase();
-  let context = '';
-
-  // Get today's matches for most queries
-  if (lowerMessage.includes('live') || lowerMessage.includes('today') || 
-      lowerMessage.includes('tonight') || lowerMessage.includes('match') ||
-      lowerMessage.includes('fixture') || lowerMessage.includes('score')) {
-    const matchesData = await getTodayMatches();
-    context += matchesData + '\n\n';
-  }
-
-  // Popular leagues with their codes
-  const leagues = {
-    'premier league': 'PL',
-    'la liga': 'PD',
-    'serie a': 'SA',
-    'bundesliga': 'BL1',
-    'ligue 1': 'FL1',
-    'champions league': 'CL'
-  };
-
-  for (const [leagueName, code] of Object.entries(leagues)) {
-    if (lowerMessage.includes(leagueName) && 
-        (lowerMessage.includes('standing') || lowerMessage.includes('table'))) {
-      const standingsData = await getStandings(code);
-      context += standingsData + '\n\n';
-      break;
-    }
-  }
-
-  return context;
-}
-
-// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
-
 // Call Gemini API with conversation history
-async function callGeminiAPI(userID, userMessage, footballContext = '') {
+async function callGeminiAPI(userID, userMessage) {
+  console.log('🔵 callGeminiAPI started');
+  console.log(`   User ID: ${userID}`);
+  console.log(`   Message: "${userMessage}"`);
+  
+  if (!GEMINI_API_KEY) {
+    console.error('❌ GEMINI_API_KEY is not set!');
+    throw new Error('Gemini API key not configured');
+  }
+  
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
   const now = new Date();
@@ -461,15 +354,10 @@ async function callGeminiAPI(userID, userMessage, footballContext = '') {
 
 Keep responses SHORT and conversational. You can reference previous messages in this conversation.`;
 
-  // Add football data if available
-  if (footballContext) {
-    systemPrompt += `\n\n**LIVE FOOTBALL DATA (Real-time):**\n${footballContext}\n\nUse this REAL data to answer football questions. This is current and accurate.`;
-  } else {
-    systemPrompt += `\n\nFor football/sports info, note that you don't have access to live scores or recent data.`;
-  }
-
   // Get conversation history
+  console.log('📚 Getting conversation history...');
   const history = conversationManager.getHistory(userID);
+  console.log(`   History length: ${history.length} messages`);
 
   // Build contents array with history for Gemini
   const historyForGemini = [];
@@ -489,54 +377,99 @@ Keep responses SHORT and conversational. You can reference previous messages in 
     parts: [{ text: userMessage }]
   });
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
-      },
-      contents: historyForGemini,
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1000
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
+  console.log(`📦 Prepared ${historyForGemini.length} messages for Gemini`);
+  console.log('🌐 Calling Gemini API...');
   
-  if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-    return data.candidates[0].content.parts[0].text;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemPrompt }]
+        },
+        contents: historyForGemini,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1000
+        }
+      })
+    });
+
+    console.log(`📡 Gemini API response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Gemini API error: ${response.status}`);
+      console.error(`Error response: ${errorText}`);
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Gemini API response parsed successfully');
+    
+    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+      const reply = data.candidates[0].content.parts[0].text;
+      console.log(`✅ Got reply: "${reply.substring(0, 100)}..."`);
+      return reply;
+    }
+    
+    console.error('❌ No valid response from Gemini');
+    console.error('Response data:', JSON.stringify(data, null, 2));
+    throw new Error('No Gemini response');
+    
+  } catch (fetchError) {
+    console.error('❌ Fetch error in callGeminiAPI:');
+    console.error('Error message:', fetchError.message);
+    console.error('Error stack:', fetchError.stack);
+    throw fetchError;
   }
-  
-  throw new Error('No Gemini response');
 }
 
 // Send message to Facebook
 async function sendFacebookMessage(recipientID, messageText) {
+  console.log('📤 sendFacebookMessage called');
+  console.log(`   Recipient: ${recipientID}`);
+  console.log(`   Message: "${messageText.substring(0, 100)}..."`);
+  
+  if (!PAGE_ACCESS_TOKEN) {
+    console.error('❌ PAGE_ACCESS_TOKEN is not set!');
+    throw new Error('Facebook access token not configured');
+  }
+  
   const url = `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      recipient: { id: recipientID },
-      message: { text: messageText }
-    })
-  });
+  console.log('🌐 Sending to Facebook API...');
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: { id: recipientID },
+        message: { text: messageText }
+      })
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Facebook error: ${response.status}`);
+    console.log(`📡 Facebook API response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Facebook API error: ${response.status}`);
+      console.error(`Error response: ${errorText}`);
+      throw new Error(`Facebook error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Message sent to Facebook successfully');
+    return result;
+    
+  } catch (fetchError) {
+    console.error('❌ Error in sendFacebookMessage:');
+    console.error('Error message:', fetchError.message);
+    console.error('Error stack:', fetchError.stack);
+    throw fetchError;
   }
-
-  return await response.json();
 }
 
 // ============================================
@@ -560,8 +493,21 @@ app.get('/stats', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('🧠 Conversation memory enabled');
+  console.log('═══════════════════════════════════════');
+  console.log('🚀 SERVER STARTING');
+  console.log('═══════════════════════════════════════');
+  console.log(`📍 Port: ${PORT}`);
+  console.log(`🕐 Time: ${new Date().toISOString()}`);
+  console.log('');
+  console.log('🔑 ENVIRONMENT VARIABLES STATUS:');
+  console.log(`   PAGE_ACCESS_TOKEN: ${PAGE_ACCESS_TOKEN ? '✅ SET' : '❌ NOT SET'}`);
+  console.log(`   VERIFY_TOKEN: ${VERIFY_TOKEN ? '✅ SET' : '❌ NOT SET'}`);
+  console.log(`   GEMINI_API_KEY: ${GEMINI_API_KEY ? '✅ SET' : '❌ NOT SET'}`);
+  console.log('');
+  console.log('🧠 Conversation memory: ENABLED');
+  console.log('');
+  console.log('✅ Server ready to receive messages');
+  console.log('═══════════════════════════════════════');
 });
 
 module.exports = app;
