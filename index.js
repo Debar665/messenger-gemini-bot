@@ -9,6 +9,8 @@ app.use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY; // Add this to Vercel env vars
+
 
 // ============================================
 // CONVERSATION MEMORY SYSTEM
@@ -126,7 +128,8 @@ app.post('/webhook', async (req, res) => {
             console.log(`Message from ${senderID}: ${userMessage}`);
 
             try {
-              sendTypingIndicator(senderID, true).catch(() => {});
+              // Start typing indicator (will repeat every 5s)
+              startTyping(senderID);
 
               // Check for special commands
               if (userMessage.toLowerCase() === '/clear' || userMessage.toLowerCase() === '/reset') {
@@ -138,8 +141,15 @@ app.post('/webhook', async (req, res) => {
               // Add user message to history
               conversationManager.addMessage(senderID, 'user', userMessage);
 
-              // Get AI response with conversation history
-              const aiReply = await callGeminiAPI(senderID, userMessage);
+              // Check if football-related and get context
+              let footballContext = '';
+              if (FOOTBALL_API_KEY && isFootballQuery(userMessage)) {
+                console.log('Football query detected, fetching data...');
+                footballContext = await getFootballContext(userMessage);
+              }
+
+              // Get AI response with conversation history and football data
+              const aiReply = await callGeminiAPI(senderID, userMessage, footballContext);
               console.log('Gemini response received');
 
               // Add AI response to history
@@ -156,7 +166,8 @@ app.post('/webhook', async (req, res) => {
                 console.error('Failed to send error:', sendError.message);
               }
             } finally {
-              sendTypingIndicator(senderID, false).catch(() => {});
+              // Always stop typing indicator
+              stopTyping(senderID);
             }
           }
           
@@ -168,6 +179,9 @@ app.post('/webhook', async (req, res) => {
             console.log(`Postback from ${senderID}: ${payload}`);
 
             try {
+              // Show typing for postback responses too
+              startTyping(senderID);
+              
               let response = '';
               
               switch(payload) {
@@ -207,6 +221,8 @@ app.post('/webhook', async (req, res) => {
 
             } catch (error) {
               console.error('Error handling postback:', error.message);
+            } finally {
+              stopTyping(senderID);
             }
           }
         }
@@ -225,7 +241,14 @@ app.post('/webhook', async (req, res) => {
 // HELPER FUNCTIONS
 // ============================================
 
-// Typing indicator
+// ============================================
+// TYPING INDICATOR SYSTEM
+// ============================================
+
+// Active typing intervals per user
+const typingIntervals = new Map();
+
+// Send typing indicator (single)
 async function sendTypingIndicator(recipientID, isTyping) {
   try {
     await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
@@ -241,8 +264,184 @@ async function sendTypingIndicator(recipientID, isTyping) {
   }
 }
 
+// Start continuous typing indicator (repeats every 5 seconds)
+function startTyping(recipientID) {
+  // Clear any existing interval
+  stopTyping(recipientID);
+  
+  // Send initial typing indicator
+  sendTypingIndicator(recipientID, true).catch(() => {});
+  
+  // Keep sending every 5 seconds (Facebook's typing indicator lasts ~20 seconds)
+  const interval = setInterval(() => {
+    sendTypingIndicator(recipientID, true).catch(() => {});
+  }, 5000);
+  
+  typingIntervals.set(recipientID, interval);
+}
+
+// Stop typing indicator
+function stopTyping(recipientID) {
+  // Clear interval if exists
+  if (typingIntervals.has(recipientID)) {
+    clearInterval(typingIntervals.get(recipientID));
+    typingIntervals.delete(recipientID);
+  }
+  
+  // Send typing off
+  sendTypingIndicator(recipientID, false).catch(() => {});
+}
+
+// ============================================
+// FOOTBALL API INTEGRATION (Football-Data.org)
+// ============================================
+
+// Fetch football data from Football-Data.org
+async function fetchFootballData(endpoint) {
+  if (!FOOTBALL_API_KEY) {
+    return null;
+  }
+
+  try {
+    const url = `https://api.football-data.org/v4/${endpoint}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-Auth-Token': FOOTBALL_API_KEY
+      }
+    });
+
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error('Football API error:', error.message);
+    return null;
+  }
+}
+
+// Get live/today's matches
+async function getTodayMatches() {
+  const data = await fetchFootballData('matches');
+  
+  if (!data || !data.matches || data.matches.length === 0) {
+    return "⚽ No matches found for today.";
+  }
+
+  let result = "⚽ **TODAY'S FOOTBALL:**\n\n";
+  const matches = data.matches.slice(0, 15);
+
+  matches.forEach(match => {
+    const home = match.homeTeam.name || match.homeTeam.shortName;
+    const away = match.awayTeam.name || match.awayTeam.shortName;
+    const competition = match.competition.name;
+    const status = match.status;
+
+    if (status === 'FINISHED') {
+      const scoreHome = match.score.fullTime.home;
+      const scoreAway = match.score.fullTime.away;
+      result += `✅ ${home} ${scoreHome} - ${scoreAway} ${away}\n`;
+      result += `   ${competition} (Final)\n\n`;
+    } else if (status === 'IN_PLAY' || status === 'PAUSED') {
+      const scoreHome = match.score.fullTime.home || 0;
+      const scoreAway = match.score.fullTime.away || 0;
+      result += `🔴 LIVE: ${home} ${scoreHome} - ${scoreAway} ${away}\n`;
+      result += `   ${competition}\n\n`;
+    } else {
+      const time = new Date(match.utcDate).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Baghdad'
+      });
+      result += `🕐 ${time} - ${home} vs ${away}\n`;
+      result += `   ${competition}\n\n`;
+    }
+  });
+
+  return result;
+}
+
+// Get league standings
+async function getStandings(competitionCode) {
+  const data = await fetchFootballData(`competitions/${competitionCode}/standings`);
+  
+  if (!data || !data.standings || data.standings.length === 0) {
+    return "Unable to get standings.";
+  }
+
+  const standings = data.standings[0].table;
+  const competition = data.competition.name;
+  
+  let result = `🏆 **${competition.toUpperCase()}:**\n\n`;
+  
+  standings.slice(0, 10).forEach(team => {
+    const pos = team.position;
+    const name = team.team.shortName || team.team.name;
+    const points = team.points;
+    const played = team.playedGames;
+    
+    result += `${pos}. ${name} - ${points} pts (${played} games)\n`;
+  });
+
+  return result;
+}
+
+// Detect if message is football-related
+function isFootballQuery(message) {
+  const footballKeywords = [
+    'football', 'soccer', 'match', 'game', 'score', 'live', 'fixture',
+    'premier league', 'la liga', 'serie a', 'bundesliga', 'ligue 1',
+    'champions league', 'uefa', 'fifa', 'world cup', 'team', 'player',
+    'goal', 'league', 'standing', 'table', 'barcelona', 'real madrid',
+    'manchester', 'liverpool', 'chelsea', 'arsenal', 'psg', 'bayern',
+    'juventus', 'milan', 'messi', 'ronaldo', 'today match', 'tonight'
+  ];
+  
+  const lowerMessage = message.toLowerCase();
+  return footballKeywords.some(keyword => lowerMessage.includes(keyword));
+}
+
+// Get football context for AI
+async function getFootballContext(message) {
+  const lowerMessage = message.toLowerCase();
+  let context = '';
+
+  // Get today's matches for most queries
+  if (lowerMessage.includes('live') || lowerMessage.includes('today') || 
+      lowerMessage.includes('tonight') || lowerMessage.includes('match') ||
+      lowerMessage.includes('fixture') || lowerMessage.includes('score')) {
+    const matchesData = await getTodayMatches();
+    context += matchesData + '\n\n';
+  }
+
+  // Popular leagues with their codes
+  const leagues = {
+    'premier league': 'PL',
+    'la liga': 'PD',
+    'serie a': 'SA',
+    'bundesliga': 'BL1',
+    'ligue 1': 'FL1',
+    'champions league': 'CL'
+  };
+
+  for (const [leagueName, code] of Object.entries(leagues)) {
+    if (lowerMessage.includes(leagueName) && 
+        (lowerMessage.includes('standing') || lowerMessage.includes('table'))) {
+      const standingsData = await getStandings(code);
+      context += standingsData + '\n\n';
+      break;
+    }
+  }
+
+  return context;
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+
 // Call Gemini API with conversation history
-async function callGeminiAPI(userID, userMessage) {
+async function callGeminiAPI(userID, userMessage, footballContext = '') {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
   const now = new Date();
@@ -258,9 +457,16 @@ async function callGeminiAPI(userID, userMessage) {
     timeZone: 'Asia/Baghdad'
   });
 
-  const systemPrompt = `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
+  let systemPrompt = `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
 
-Keep responses SHORT and conversational. You can reference previous messages in this conversation. If asked about real-time info (sports scores, news), politely say you can't access live data.`;
+Keep responses SHORT and conversational. You can reference previous messages in this conversation.`;
+
+  // Add football data if available
+  if (footballContext) {
+    systemPrompt += `\n\n**LIVE FOOTBALL DATA (Real-time):**\n${footballContext}\n\nUse this REAL data to answer football questions. This is current and accurate.`;
+  } else {
+    systemPrompt += `\n\nFor football/sports info, note that you don't have access to live scores or recent data.`;
+  }
 
   // Get conversation history
   const history = conversationManager.getHistory(userID);
