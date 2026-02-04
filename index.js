@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 // Load from environment variables
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;  // You'll need to add this to Vercel
 
 // Webhook verification
 app.get('/webhook', (req, res) => {
@@ -50,8 +50,8 @@ app.post('/webhook', async (req, res) => {
             try {
               sendTypingIndicator(senderID, true).catch(() => {});
 
-              const aiReply = await callDeepSeekAPI(userMessage);
-              console.log('AI response received');
+              const aiReply = await callGeminiAPI(userMessage);
+              console.log('Gemini response received');
 
               await sendFacebookMessage(senderID, aiReply);
               console.log('Message sent successfully');
@@ -84,7 +84,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'ABOUT_BOT':
-                  response = "🤖 I'm an AI assistant powered by DeepSeek R1T2 Chimera, one of the most advanced AI models.\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
+                  response = "🤖 I'm an AI assistant powered by Google Gemini 2.5 Flash-Lite.\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
                   break;
                   
                 case 'START_CHAT':
@@ -138,9 +138,9 @@ async function sendTypingIndicator(recipientID, isTyping) {
   }
 }
 
-// Call DeepSeek API
-async function callDeepSeekAPI(userMessage) {
-  const url = 'https://openrouter.ai/api/v1/chat/completions';
+// Call Gemini API
+async function callGeminiAPI(userMessage) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
@@ -161,35 +161,35 @@ Keep responses SHORT and conversational. If asked about real-time info (sports s
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://messenger-gemini-bot.vercel.app',
-      'X-Title': 'Messenger AI Bot'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'tngtech/deepseek-r1t2-chimera:free',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
+      contents: [
+        {
+          parts: [
+            { text: systemPrompt },
+            { text: userMessage }
+          ]
+        }
       ],
-      temperature: 0.7,
-      max_tokens: 1000
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1000
+      }
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`AI error: ${response.status}`);
+    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   
-  if (data.choices && data.choices[0] && data.choices[0].message) {
-    return data.choices[0].message.content;
+  if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+    return data.candidates[0].content.parts[0].text;
   }
   
-  throw new Error('No AI response');
+  throw new Error('No Gemini response');
 }
 
 // Send message to Facebook
@@ -215,7 +215,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('🤖 Professional AI Bot - DeepSeek R1T2 Chimera');
+  res.send('🤖 AI Bot - Google Gemini 2.5 Flash-Lite');
 });
 
 const PORT = process.env.PORT || 3000;
