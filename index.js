@@ -31,32 +31,41 @@ app.post('/webhook', async (req, res) => {
 
     if (body.object === 'page') {
       for (const entry of body.entry) {
+        const pageID = entry.id; // The page's own ID
+        
         for (const event of entry.messaging) {
-          // Ignore echo messages AND page messages
-          if (event.message && event.message.text && !event.message.is_echo && event.sender && event.recipient) {
-            const senderID = event.sender.id;
-            const recipientID = event.recipient.id;
+          // CRITICAL: Only process if message exists, has text, is NOT echo, and sender is NOT the page
+          if (event.message && 
+              event.message.text && 
+              !event.message.is_echo &&
+              event.sender &&
+              event.sender.id !== pageID) {  // FIXED: Don't reply to page itself
             
-            // Only respond if sender is NOT the page (user is messaging the page)
-            if (senderID !== recipientID) {
-              const userMessage = event.message.text;
+            const senderID = event.sender.id;
+            const userMessage = event.message.text;
 
-              console.log(`Message from user ${senderID}: ${userMessage}`);
+            console.log(`Processing message from user ${senderID}: ${userMessage}`);
 
+            try {
+              // Call DeepSeek R1T2 Chimera via OpenRouter
+              const aiReply = await callDeepSeekAPI(userMessage);
+              console.log('DeepSeek response received');
+
+              // Send reply to Facebook
+              await sendFacebookMessage(senderID, aiReply);
+              console.log('Message sent successfully to user');
+
+            } catch (error) {
+              console.error('Error processing message:', error.message);
+              // Only try to send error message if senderID is valid (not page)
               try {
-                // Call DeepSeek R1T2 Chimera via OpenRouter (FREE & SMART!)
-                const aiReply = await callDeepSeekAPI(userMessage);
-                console.log('DeepSeek response received');
-
-                // Send reply to Facebook
-                await sendFacebookMessage(senderID, aiReply);
-                console.log('Message sent successfully');
-
-              } catch (error) {
-                console.error('Error processing message:', error);
                 await sendFacebookMessage(senderID, 'Sorry, I encountered an error. Please try again.');
+              } catch (sendError) {
+                console.error('Failed to send error message:', sendError.message);
               }
             }
+          } else {
+            console.log('Ignoring message (echo or from page itself)');
           }
         }
       }
@@ -65,12 +74,12 @@ app.post('/webhook', async (req, res) => {
     res.status(200).send('EVENT_RECEIVED');
 
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook error:', error.message);
     res.status(500).send('ERROR');
   }
 });
 
-// Function to call DeepSeek R1T2 Chimera via OpenRouter (FREE!)
+// Function to call DeepSeek R1T2 Chimera via OpenRouter
 async function callDeepSeekAPI(userMessage) {
   const url = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -83,7 +92,7 @@ async function callDeepSeekAPI(userMessage) {
       'X-Title': 'Messenger AI Bot'
     },
     body: JSON.stringify({
-      model: 'tngtech/deepseek-r1t2-chimera:free',  // CORRECT FREE MODEL!
+      model: 'tngtech/deepseek-r1t2-chimera:free',
       messages: [{
         role: 'user',
         content: userMessage
@@ -132,7 +141,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('Bot is running with DeepSeek R1T2 Chimera - FREE & SMART!');
+  res.send('Bot is running with DeepSeek R1T2 Chimera!');
 });
 
 const PORT = process.env.PORT || 3000;
