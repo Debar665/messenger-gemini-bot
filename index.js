@@ -300,7 +300,7 @@ Keep responses SHORT and conversational. You can reference previous messages in 
       'X-Title': 'Messenger AI Bot' // Optional
     },
     body: JSON.stringify({
-      model: 'meta-llama/llama-3.1-8b-instruct:free', // Free model
+      model: 'tngtech/deepseek-r1t2-chimera:free', // Free model
       messages: messages,
       temperature: 0.7,
       max_tokens: 1000
