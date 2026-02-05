@@ -47,67 +47,167 @@ app.post('/webhook', async (req, res) => {
 
             console.log(`Message from ${senderID}: ${userMessage}`);
 
+            // ✅ FEATURE 3: Smart Input Validation
+            if (!isValidMessage(userMessage)) {
+              console.log('Invalid message detected (spam/emoji-only)');
+              await sendMessageWithQuickReplies(
+                senderID,
+                "I didn't quite catch that! 🤔 Try asking me something like:",
+                [
+                  { title: "What can you do?", payload: "ABOUT_BOT" },
+                  { title: "Ask a question", payload: "START_CHAT" },
+                  { title: "Get help", payload: "HELP" }
+                ]
+              );
+              continue;
+            }
+
             try {
+              // Mark message as seen
+              await markSeen(senderID);
+              
+              // Show typing indicator
               sendTypingIndicator(senderID, true).catch(() => {});
 
+              // Get AI response
               const aiReply = await callDeepSeekAPI(userMessage);
               console.log('AI response received');
 
-              await sendFacebookMessage(senderID, aiReply);
-              console.log('Message sent successfully');
+              // Turn off typing
+              await sendTypingIndicator(senderID, false);
+
+              // ✅ FEATURE 2: Message Splitting (for long responses)
+              const messageChunks = splitMessage(aiReply, 2000);
+              
+              // Send each chunk
+              for (let i = 0; i < messageChunks.length; i++) {
+                if (i > 0) {
+                  // Small delay between chunks
+                  await sleep(800);
+                }
+                
+                // Last chunk gets quick reply buttons
+                if (i === messageChunks.length - 1) {
+                  // ✅ FEATURE 1: Quick Reply Buttons
+                  await sendMessageWithQuickReplies(
+                    senderID,
+                    messageChunks[i],
+                    [
+                      { title: "Ask another question", payload: "CONTINUE" },
+                      { title: "Main Menu", payload: "MAIN_MENU" },
+                      { title: "Help", payload: "HELP" }
+                    ]
+                  );
+                } else {
+                  // Other chunks sent normally
+                  await sendFacebookMessage(senderID, messageChunks[i]);
+                }
+              }
+
+              console.log('All messages sent successfully');
 
             } catch (error) {
               console.error('Error:', error.message);
+              await sendTypingIndicator(senderID, false);
+              
               try {
-                await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
+                await sendMessageWithQuickReplies(
+                  senderID,
+                  "Oops! Something went wrong. 😔 Let's try again!",
+                  [
+                    { title: "Retry", payload: "START_CHAT" },
+                    { title: "Main Menu", payload: "MAIN_MENU" },
+                    { title: "Get Help", payload: "HELP" }
+                  ]
+                );
               } catch (sendError) {
                 console.error('Failed to send error:', sendError.message);
               }
-            } finally {
-              sendTypingIndicator(senderID, false).catch(() => {});
             }
           }
           
-          // Handle button clicks (postbacks)
-          else if (event.postback) {
+          // Handle button clicks (postbacks) and quick replies
+          else if (event.postback || (event.message && event.message.quick_reply)) {
             const senderID = event.sender.id;
-            const payload = event.postback.payload;
+            const payload = event.postback ? event.postback.payload : event.message.quick_reply.payload;
 
-            console.log(`Postback from ${senderID}: ${payload}`);
+            console.log(`Button clicked from ${senderID}: ${payload}`);
 
             try {
+              await markSeen(senderID);
               let response = '';
+              let quickReplies = [];
               
               switch(payload) {
                 case 'GET_STARTED':
-                  response = "👋 Welcome! I'm your AI assistant. I can:\n\n✅ Answer questions\n✅ Provide information\n✅ Have intelligent conversations\n✅ Help with various topics\n\nJust type your question and I'll respond!";
+                  response = "👋 Welcome! I'm your AI assistant powered by advanced AI.\n\nI can help you with:\n✅ Answering questions\n✅ Explaining concepts\n✅ Having conversations\n✅ Problem-solving\n\nWhat would you like to know?";
+                  quickReplies = [
+                    { title: "What can you do?", payload: "ABOUT_BOT" },
+                    { title: "Start chatting", payload: "START_CHAT" },
+                    { title: "Get help", payload: "HELP" }
+                  ];
                   break;
                   
                 case 'ABOUT_BOT':
-                  response = "🤖 I'm an AI assistant powered by DeepSeek R1T2 Chimera, one of the most advanced AI models.\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
+                  response = "🤖 I'm powered by DeepSeek R1T2 Chimera - one of the most advanced AI models!\n\nI excel at:\n• General knowledge & facts\n• Detailed explanations\n• Creative writing\n• Problem-solving\n• Coding help\n• And much more!\n\nI'm here 24/7 to help you!";
+                  quickReplies = [
+                    { title: "Ask me something", payload: "START_CHAT" },
+                    { title: "See examples", payload: "EXAMPLES" },
+                    { title: "Main Menu", payload: "MAIN_MENU" }
+                  ];
                   break;
                   
                 case 'START_CHAT':
-                  response = "💬 Great! I'm ready to chat. Ask me anything you'd like to know!";
+                case 'CONTINUE':
+                  response = "Perfect! 😊 I'm ready to help. What's on your mind?";
+                  quickReplies = [
+                    { title: "Example questions", payload: "EXAMPLES" },
+                    { title: "What can you do?", payload: "ABOUT_BOT" },
+                    { title: "Help", payload: "HELP" }
+                  ];
+                  break;
+                  
+                case 'EXAMPLES':
+                  response = "💡 **Try asking me:**\n\n• \"Explain how photosynthesis works\"\n• \"Write a short story about space\"\n• \"Help me solve this math problem\"\n• \"What's the difference between X and Y?\"\n• \"Give me tips for learning programming\"\n\nJust type your question!";
+                  quickReplies = [
+                    { title: "Ask a question", payload: "START_CHAT" },
+                    { title: "What can you do?", payload: "ABOUT_BOT" },
+                    { title: "Main Menu", payload: "MAIN_MENU" }
+                  ];
                   break;
                   
                 case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions\n\n**Tips:**\n• Be specific for better answers\n• I can't access real-time info (sports scores, news)\n• I'm here 24/7!\n\nWhat can I help you with?";
+                  response = "🆘 **How to use me:**\n\n1️⃣ Type your question naturally\n2️⃣ I'll respond with helpful info\n3️⃣ Ask follow-ups for more details\n4️⃣ Use quick reply buttons for shortcuts!\n\n**Note:** I can't access real-time info like live sports scores or current news.\n\nWhat can I help you with?";
+                  quickReplies = [
+                    { title: "Start chatting", payload: "START_CHAT" },
+                    { title: "See examples", payload: "EXAMPLES" },
+                    { title: "Main Menu", payload: "MAIN_MENU" }
+                  ];
                   break;
                   
                 case 'MAIN_MENU':
-                  response = "🏠 **Main Menu**\n\nWhat would you like to do?\n\n• Ask me a question\n• Learn what I can do\n• Get help using the bot\n\nJust type your message!";
+                  response = "🏠 **Main Menu**\n\nWhat would you like to do?";
+                  quickReplies = [
+                    { title: "Ask a question", payload: "START_CHAT" },
+                    { title: "What can you do?", payload: "ABOUT_BOT" },
+                    { title: "See examples", payload: "EXAMPLES" },
+                    { title: "Get help", payload: "HELP" }
+                  ];
                   break;
                   
                 default:
                   response = "I'm here to help! What would you like to know?";
+                  quickReplies = [
+                    { title: "Ask a question", payload: "START_CHAT" },
+                    { title: "Main Menu", payload: "MAIN_MENU" }
+                  ];
               }
               
-              await sendFacebookMessage(senderID, response);
-              console.log('Postback response sent');
+              await sendMessageWithQuickReplies(senderID, response, quickReplies);
+              console.log('Response sent with quick replies');
 
             } catch (error) {
-              console.error('Error handling postback:', error.message);
+              console.error('Error handling button:', error.message);
             }
           }
         }
@@ -121,6 +221,91 @@ app.post('/webhook', async (req, res) => {
     res.status(500).send('ERROR');
   }
 });
+
+// ✅ FEATURE 3: Smart Input Validation
+function isValidMessage(text) {
+  // Remove whitespace
+  const trimmed = text.trim();
+  
+  // Check minimum length
+  if (trimmed.length < 2) return false;
+  
+  // Check if it's only emojis/symbols
+  const onlyEmojisOrSymbols = /^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]*$/u;
+  if (onlyEmojisOrSymbols.test(trimmed)) return false;
+  
+  // Check if it's repetitive spam (same char repeated)
+  const sameCharPattern = /^(.)\1{4,}$/;
+  if (sameCharPattern.test(trimmed)) return false;
+  
+  // Check if it has at least some letters
+  const hasLetters = /[a-zA-Z\u0600-\u06FF]/.test(trimmed); // Includes Arabic
+  if (!hasLetters) return false;
+  
+  return true;
+}
+
+// ✅ FEATURE 2: Message Splitting
+function splitMessage(text, maxLength = 2000) {
+  if (text.length <= maxLength) {
+    return [text];
+  }
+
+  const chunks = [];
+  const paragraphs = text.split('\n\n');
+  let currentChunk = '';
+
+  for (const paragraph of paragraphs) {
+    if ((currentChunk + '\n\n' + paragraph).length > maxLength) {
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
+      }
+
+      // If single paragraph is too long, split by sentences
+      if (paragraph.length > maxLength) {
+        const sentences = paragraph.match(/[^.!?]+[.!?]+/g) || [paragraph];
+        
+        for (const sentence of sentences) {
+          if ((currentChunk + sentence).length > maxLength) {
+            if (currentChunk) {
+              chunks.push(currentChunk.trim());
+            }
+            currentChunk = sentence;
+          } else {
+            currentChunk += (currentChunk ? ' ' : '') + sentence;
+          }
+        }
+      } else {
+        currentChunk = paragraph;
+      }
+    } else {
+      currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [text];
+}
+
+// Mark message as seen
+async function markSeen(recipientID) {
+  try {
+    await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: { id: recipientID },
+        sender_action: 'mark_seen'
+      })
+    });
+  } catch (error) {
+    // Ignore
+  }
+}
 
 // Typing indicator
 async function sendTypingIndicator(recipientID, isTyping) {
@@ -157,7 +342,7 @@ async function callDeepSeekAPI(userMessage) {
 
   const systemPrompt = `You are a helpful AI assistant. Today is ${dateStr}, ${timeStr} (Iraq time).
 
-Keep responses SHORT and conversational. If asked about real-time info (sports scores, news), politely say you can't access live data.`;
+Keep responses helpful and conversational. If asked about real-time info (sports scores, live news), politely say you can't access live data and suggest checking official sources.`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -174,7 +359,7 @@ Keep responses SHORT and conversational. If asked about real-time info (sports s
         { role: 'user', content: userMessage }
       ],
       temperature: 0.7,
-      max_tokens: 1000
+      max_tokens: 1500
     })
   });
 
@@ -192,7 +377,39 @@ Keep responses SHORT and conversational. If asked about real-time info (sports s
   throw new Error('No AI response');
 }
 
-// Send message to Facebook
+// ✅ FEATURE 1: Send message WITH Quick Reply Buttons
+async function sendMessageWithQuickReplies(recipientID, messageText, quickReplies = []) {
+  const url = `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
+
+  const messageData = {
+    recipient: { id: recipientID },
+    message: { text: messageText }
+  };
+
+  // Add quick replies if provided
+  if (quickReplies.length > 0) {
+    messageData.message.quick_replies = quickReplies.map(qr => ({
+      content_type: 'text',
+      title: qr.title,
+      payload: qr.payload
+    }));
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(messageData)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Facebook error: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+// Send regular message (without quick replies)
 async function sendFacebookMessage(recipientID, messageText) {
   const url = `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
 
@@ -213,9 +430,14 @@ async function sendFacebookMessage(recipientID, messageText) {
   return await response.json();
 }
 
+// Sleep helper
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Health check
 app.get('/', (req, res) => {
-  res.send('🤖 Professional AI Bot - DeepSeek R1T2 Chimera');
+  res.send('🤖 Professional AI Bot v2.0 - Production Ready!');
 });
 
 const PORT = process.env.PORT || 3000;
