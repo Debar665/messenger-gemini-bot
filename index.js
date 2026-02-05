@@ -9,6 +9,7 @@ app.use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 
 // ============================================
 // CONVERSATION MEMORY SYSTEM
@@ -135,6 +136,46 @@ app.post('/webhook', async (req, res) => {
                 continue;
               }
 
+              // Check for weather requests
+              const lowerMessage = userMessage.toLowerCase();
+              if (lowerMessage.includes('weather') || lowerMessage.includes('temperature') || lowerMessage.includes('temp in')) {
+                const weatherKeywords = ['weather in ', 'weather for ', 'temperature in ', 'temperature for ', 'temp in ', 'temp for '];
+                let city = '';
+                
+                for (const keyword of weatherKeywords) {
+                  if (lowerMessage.includes(keyword)) {
+                    const parts = userMessage.toLowerCase().split(keyword);
+                    if (parts[1]) {
+                      city = parts[1].trim().split(/[?,!.\s]/)[0];
+                      break;
+                    }
+                  }
+                }
+                
+                // Also check for pattern like "Baghdad weather" or "London temperature"
+                if (!city) {
+                  const words = userMessage.trim().split(' ');
+                  if (words.length >= 2) {
+                    if (lowerMessage.includes('weather') || lowerMessage.includes('temperature')) {
+                      // Take the first word as potential city name
+                      city = words[0];
+                    }
+                  }
+                }
+                
+                if (city && city.length > 2) {
+                  const weatherInfo = await getWeather(city);
+                  await sendFacebookMessage(senderID, weatherInfo);
+                  sendTypingIndicator(senderID, false).catch(() => {});
+                  continue;
+                } else {
+                  await sendFacebookMessage(senderID, "🌍 Which city's weather would you like to know? (e.g., 'weather in Baghdad')");
+                  sendTypingIndicator(senderID, false).catch(() => {});
+                  continue;
+                }
+              }
+
+
               // Add user message to history
               conversationManager.addMessage(senderID, 'user', userMessage);
 
@@ -186,7 +227,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I can't access real-time info (sports scores, news)\n• I'm here 24/7!\n\nWhat can I help you with?";
+                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Features:**\n• 🌡️ Weather: Ask 'weather in [city]'\n• 💬 Smart conversations with memory\n• ❓ Answer questions on any topic\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I'm here 24/7!\n\nWhat can I help you with?";
                   break;
                   
                 case 'MAIN_MENU':
@@ -226,6 +267,33 @@ app.post('/webhook', async (req, res) => {
 // ============================================
 
 // Typing indicator
+
+// Get weather information
+async function getWeather(city) {
+  if (!WEATHER_API_KEY) {
+    return "⚠️ Weather API not configured. Please add WEATHER_API_KEY to environment variables.";
+  }
+
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${WEATHER_API_KEY}&units=metric`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.cod === 200) {
+      return `🌡️ Weather in ${data.name}, ${data.sys.country}:
+📍 Temperature: ${data.main.temp}°C (feels like ${data.main.feels_like}°C)
+☁️ Condition: ${data.weather[0].description}
+💧 Humidity: ${data.main.humidity}%
+💨 Wind: ${data.wind.speed} m/s`;
+    } else {
+      return `❌ Couldn't find weather for "${city}". Try using just the city name (e.g., "Baghdad", "London").`;
+    }
+  } catch (error) {
+    console.error('Weather API error:', error);
+    return "❌ Error getting weather data. Please try again.";
+  }
+}
+
 async function sendTypingIndicator(recipientID, isTyping) {
   try {
     await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
@@ -350,11 +418,11 @@ async function sendFacebookMessage(recipientID, messageText) {
 // Health check
 app.get('/', (req, res) => {
   const stats = conversationManager.getStats();
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)
-  
-🧠 Memory Enabled
-📊 Active conversations: ${stats.activeConversations}
-💬 Total messages stored: ${stats.totalMessages}`);
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
 });
 
 // Stats endpoint (for monitoring)
