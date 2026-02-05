@@ -136,28 +136,41 @@ app.post('/webhook', async (req, res) => {
               }
 
               // Check for weather requests
-              const lowerMessage = userMessage.toLowerCase();
-              if (lowerMessage.includes('weather') || lowerMessage.includes('temperature') || lowerMessage.includes('temp in')) {
-                const weatherKeywords = ['weather in ', 'weather for ', 'temperature in ', 'temperature for ', 'temp in ', 'temp for '];
+              const lowerMessage = userMessage.toLowerCase().trim();
+              if (lowerMessage.includes('weather') || lowerMessage.includes('temperature') || lowerMessage.includes('temp')) {
                 let city = '';
                 
-                for (const keyword of weatherKeywords) {
-                  if (lowerMessage.includes(keyword)) {
-                    const parts = userMessage.toLowerCase().split(keyword);
-                    if (parts[1]) {
-                      city = parts[1].trim().split(/[?,!.\s]/)[0];
-                      break;
-                    }
+                // Pattern 1: "weather in London", "temperature in Baghdad", etc.
+                const patterns = [
+                  /weather\s+in\s+([a-zA-Z\s]+)/i,
+                  /weather\s+for\s+([a-zA-Z\s]+)/i,
+                  /temperature\s+in\s+([a-zA-Z\s]+)/i,
+                  /temperature\s+for\s+([a-zA-Z\s]+)/i,
+                  /temp\s+in\s+([a-zA-Z\s]+)/i,
+                  /temp\s+for\s+([a-zA-Z\s]+)/i
+                ];
+                
+                for (const pattern of patterns) {
+                  const match = userMessage.match(pattern);
+                  if (match && match[1]) {
+                    city = match[1].trim();
+                    break;
                   }
                 }
                 
-                // Also check for pattern like "Baghdad weather" or "London temperature"
+                // Pattern 2: "London weather", "Baghdad temperature"
                 if (!city) {
-                  const words = userMessage.trim().split(' ');
-                  if (words.length >= 2) {
-                    if (lowerMessage.includes('weather') || lowerMessage.includes('temperature')) {
-                      // Take the first word as potential city name
-                      city = words[0];
+                  const reversePatterns = [
+                    /^([a-zA-Z\s]+)\s+weather/i,
+                    /^([a-zA-Z\s]+)\s+temperature/i,
+                    /^([a-zA-Z\s]+)\s+temp/i
+                  ];
+                  
+                  for (const pattern of reversePatterns) {
+                    const match = userMessage.match(pattern);
+                    if (match && match[1]) {
+                      city = match[1].trim();
+                      break;
                     }
                   }
                 }
