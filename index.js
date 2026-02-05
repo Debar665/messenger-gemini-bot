@@ -9,7 +9,6 @@ app.use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'my_secret_verify_token_12345';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 
 // ============================================
 // CONVERSATION MEMORY SYSTEM
@@ -268,26 +267,47 @@ app.post('/webhook', async (req, res) => {
 
 // Typing indicator
 
-// Get weather information
+// Get weather information using Open-Meteo (no API key needed!)
 async function getWeather(city) {
-  if (!WEATHER_API_KEY) {
-    return "⚠️ Weather API not configured. Please add WEATHER_API_KEY to environment variables.";
-  }
-
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${WEATHER_API_KEY}&units=metric`;
-    const response = await fetch(url);
-    const data = await response.json();
+    // Step 1: Get coordinates for the city
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
+    const geoResponse = await fetch(geoUrl);
+    const geoData = await geoResponse.json();
 
-    if (data.cod === 200) {
-      return `🌡️ Weather in ${data.name}, ${data.sys.country}:
-📍 Temperature: ${data.main.temp}°C (feels like ${data.main.feels_like}°C)
-☁️ Condition: ${data.weather[0].description}
-💧 Humidity: ${data.main.humidity}%
-💨 Wind: ${data.wind.speed} m/s`;
-    } else {
-      return `❌ Couldn't find weather for "${city}". Try using just the city name (e.g., "Baghdad", "London").`;
+    if (!geoData.results || geoData.results.length === 0) {
+      return `❌ Couldn't find "${city}". Try another city name (e.g., "Baghdad", "London").`;
     }
+
+    const location = geoData.results[0];
+    const { latitude, longitude, name, country } = location;
+
+    // Step 2: Get weather data
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&timezone=auto`;
+    const weatherResponse = await fetch(weatherUrl);
+    const weatherData = await weatherResponse.json();
+
+    const current = weatherData.current;
+    const weatherCode = current.weather_code;
+    
+    // Convert weather code to description
+    const weatherDescriptions = {
+      0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+      45: 'Foggy', 48: 'Foggy', 51: 'Light drizzle', 53: 'Moderate drizzle',
+      55: 'Dense drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+      71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow', 80: 'Rain showers',
+      81: 'Moderate rain showers', 82: 'Violent rain showers', 95: 'Thunderstorm',
+      96: 'Thunderstorm with hail', 99: 'Thunderstorm with heavy hail'
+    };
+    
+    const condition = weatherDescriptions[weatherCode] || 'Unknown';
+
+    return `🌡️ Weather in ${name}, ${country}:
+📍 Temperature: ${current.temperature_2m}°C
+☁️ Condition: ${condition}
+💧 Humidity: ${current.relative_humidity_2m}%
+💨 Wind: ${current.wind_speed_10m} km/h`;
+    
   } catch (error) {
     console.error('Weather API error:', error);
     return "❌ Error getting weather data. Please try again.";
@@ -418,12 +438,14 @@ async function sendFacebookMessage(recipientID, messageText) {
 // Health check
 app.get('/', (req, res) => {
   const stats = conversationManager.getStats();
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)\n  \n🧠 Memory Enabled\n🌡️ Weather: ${WEATHER_API_KEY ? 'Enabled ✅' : 'Not configured ⚠️'}\n📊 Active conversations: ${stats.activeConversations}\n💬 Total messages stored: ${stats.totalMessages}`);
+  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)
+  
+🧠 Memory Enabled
+🌡️ Weather: Enabled ✅ (Open-Meteo - No API key needed!)
+📊 Active conversations: ${stats.activeConversations}
+💬 Total messages stored: ${stats.totalMessages}`);
 });
+
 
 // Stats endpoint (for monitoring)
 app.get('/stats', (req, res) => {
