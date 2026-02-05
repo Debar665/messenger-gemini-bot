@@ -23,10 +23,16 @@ const conversations = new Map();
 const MAX_HISTORY_MESSAGES = 10; // Keep last 10 messages per user
 const CONVERSATION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 
+// Track processed messages to prevent duplicates
+const processedMessages = new Set();
+const MESSAGE_EXPIRE_TIME = 5 * 60 * 1000; // 5 minutes
+
 class ConversationManager {
   constructor() {
     // Cleanup old conversations every 10 minutes
     setInterval(() => this.cleanupOldConversations(), 10 * 60 * 1000);
+    // Cleanup processed message IDs every minute
+    setInterval(() => this.cleanupProcessedMessages(), 60 * 1000);
   }
 
   getConversation(userID) {
@@ -73,6 +79,16 @@ class ConversationManager {
     }
   }
 
+  cleanupProcessedMessages() {
+    const now = Date.now();
+    for (const msgKey of processedMessages) {
+      const [timestamp] = msgKey.split(':');
+      if (now - parseInt(timestamp) > MESSAGE_EXPIRE_TIME) {
+        processedMessages.delete(msgKey);
+      }
+    }
+  }
+
   getStats() {
     return {
       activeConversations: conversations.size,
@@ -104,175 +120,181 @@ app.get('/webhook', (req, res) => {
 
 // Receive messages and postbacks
 app.post('/webhook', async (req, res) => {
+  // CRITICAL: Send 200 response immediately to prevent Facebook retries
+  res.status(200).send('EVENT_RECEIVED');
+
   try {
     const body = req.body;
-    console.log('Webhook received');
+    console.log('Webhook received:', JSON.stringify(body, null, 2));
 
     if (body.object === 'page') {
-      for (const entry of body.entry) {
-        const pageID = entry.id;
+      // Process messages asynchronously (after responding to Facebook)
+      processWebhookEvents(body).catch(err => {
+        console.error('Error processing webhook events:', err);
+      });
+    }
+  } catch (error) {
+    console.error('Webhook error:', error);
+  }
+});
+
+// Process webhook events asynchronously
+async function processWebhookEvents(body) {
+  for (const entry of body.entry) {
+    const pageID = entry.id;
+    
+    for (const event of entry.messaging) {
+      // Handle regular messages
+      if (event.message && 
+          event.message.text && 
+          !event.message.is_echo &&
+          event.sender &&
+          event.sender.id !== pageID) {
         
-        for (const event of entry.messaging) {
-          // Handle regular messages
-          if (event.message && 
-              event.message.text && 
-              !event.message.is_echo &&
-              event.sender &&
-              event.sender.id !== pageID) {
+        const senderID = event.sender.id;
+        const userMessage = event.message.text;
+        const messageID = event.message.mid;
+
+        // Create unique message key to prevent duplicates
+        const messageKey = `${Date.now()}:${senderID}:${messageID}`;
+        
+        // Skip if already processed
+        if (processedMessages.has(messageKey)) {
+          console.log(`Skipping duplicate message: ${messageID}`);
+          return;
+        }
+        
+        // Mark as processed
+        processedMessages.add(messageKey);
+
+        console.log(`Message from ${senderID}: ${userMessage}`);
+
+        try {
+          sendTypingIndicator(senderID, true).catch(() => {});
+
+          // Check for special commands
+          if (userMessage.toLowerCase() === '/clear' || userMessage.toLowerCase() === '/reset') {
+            conversationManager.clearConversation(senderID);
+            await sendFacebookMessage(senderID, "🔄 Conversation cleared! Let's start fresh. What would you like to talk about?");
+            continue;
+          }
+
+          // Check for weather requests
+          const lowerMessage = userMessage.toLowerCase().trim();
+          if (lowerMessage.includes('weather') || lowerMessage.includes('temperature') || lowerMessage.includes('temp')) {
+            let city = '';
             
-            const senderID = event.sender.id;
-            const userMessage = event.message.text;
-
-            console.log(`Message from ${senderID}: ${userMessage}`);
-
-            try {
-              sendTypingIndicator(senderID, true).catch(() => {});
-
-              // Check for special commands
-              if (userMessage.toLowerCase() === '/clear' || userMessage.toLowerCase() === '/reset') {
-                conversationManager.clearConversation(senderID);
-                await sendFacebookMessage(senderID, "🔄 Conversation cleared! Let's start fresh. What would you like to talk about?");
-                continue;
+            // Pattern 1: "weather in London", "temperature in Baghdad", etc.
+            const patterns = [
+              /weather\s+in\s+([a-zA-Z\s]+)/i,
+              /weather\s+for\s+([a-zA-Z\s]+)/i,
+              /temperature\s+in\s+([a-zA-Z\s]+)/i,
+              /temperature\s+for\s+([a-zA-Z\s]+)/i,
+              /temp\s+in\s+([a-zA-Z\s]+)/i,
+              /temp\s+for\s+([a-zA-Z\s]+)/i
+            ];
+            
+            for (const pattern of patterns) {
+              const match = userMessage.match(pattern);
+              if (match && match[1]) {
+                city = match[1].trim();
+                break;
               }
-
-              // Check for weather requests
-              const lowerMessage = userMessage.toLowerCase().trim();
-              if (lowerMessage.includes('weather') || lowerMessage.includes('temperature') || lowerMessage.includes('temp')) {
-                let city = '';
-                
-                // Pattern 1: "weather in London", "temperature in Baghdad", etc.
-                const patterns = [
-                  /weather\s+in\s+([a-zA-Z\s]+)/i,
-                  /weather\s+for\s+([a-zA-Z\s]+)/i,
-                  /temperature\s+in\s+([a-zA-Z\s]+)/i,
-                  /temperature\s+for\s+([a-zA-Z\s]+)/i,
-                  /temp\s+in\s+([a-zA-Z\s]+)/i,
-                  /temp\s+for\s+([a-zA-Z\s]+)/i
-                ];
-                
-                for (const pattern of patterns) {
-                  const match = userMessage.match(pattern);
-                  if (match && match[1]) {
-                    city = match[1].trim();
-                    break;
-                  }
-                }
-                
-                // Pattern 2: "London weather", "Baghdad temperature"
-                if (!city) {
-                  const reversePatterns = [
-                    /^([a-zA-Z\s]+)\s+weather/i,
-                    /^([a-zA-Z\s]+)\s+temperature/i,
-                    /^([a-zA-Z\s]+)\s+temp/i
-                  ];
-                  
-                  for (const pattern of reversePatterns) {
-                    const match = userMessage.match(pattern);
-                    if (match && match[1]) {
-                      city = match[1].trim();
-                      break;
-                    }
-                  }
-                }
-                
-                if (city && city.length > 2) {
-                  const weatherInfo = await getWeather(city);
-                  await sendFacebookMessage(senderID, weatherInfo);
-                  sendTypingIndicator(senderID, false).catch(() => {});
-                  continue;
-                } else {
-                  await sendFacebookMessage(senderID, "🌍 Which city's weather would you like to know? (e.g., 'weather in Baghdad')");
-                  sendTypingIndicator(senderID, false).catch(() => {});
-                  continue;
-                }
-              }
-
-
-              // Add user message to history
-              conversationManager.addMessage(senderID, 'user', userMessage);
-
-              // Get AI response with conversation history
-              const aiReply = await callOpenRouterAPI(senderID, userMessage);
-              console.log('OpenRouter response received');
-
-              // Add AI response to history
-              conversationManager.addMessage(senderID, 'assistant', aiReply);
-
-              await sendFacebookMessage(senderID, aiReply);
-              console.log('Message sent successfully');
-
-            } catch (error) {
-              console.error('Error:', error.message);
-              try {
-                await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
-              } catch (sendError) {
-                console.error('Failed to send error:', sendError.message);
-              }
-            } finally {
-              sendTypingIndicator(senderID, false).catch(() => {});
             }
+            
+            // Pattern 2: "London weather", "Baghdad temperature"
+            if (!city) {
+              const reversePatterns = [
+                /^([a-zA-Z\s]+)\s+weather/i,
+                /^([a-zA-Z\s]+)\s+temperature/i,
+                /^([a-zA-Z\s]+)\s+temp/i
+              ];
+              
+              for (const pattern of reversePatterns) {
+                const match = userMessage.match(pattern);
+                if (match && match[1]) {
+                  city = match[1].trim();
+                  break;
+                }
+              }
+            }
+            
+            if (city && city.length > 2) {
+              const weatherInfo = await getWeather(city);
+              await sendFacebookMessage(senderID, weatherInfo);
+              sendTypingIndicator(senderID, false).catch(() => {});
+              continue;
+            } else {
+              await sendFacebookMessage(senderID, "🌍 Which city's weather would you like to know? (e.g., 'weather in Baghdad')");
+              sendTypingIndicator(senderID, false).catch(() => {});
+              continue;
+            }
+          }
+
+
+          // Add user message to history
+          conversationManager.addMessage(senderID, 'user', userMessage);
+
+          // Get AI response with conversation history
+          const aiReply = await callOpenRouterAPI(senderID, userMessage);
+          console.log('OpenRouter response received');
+
+          // Add AI response to history
+          conversationManager.addMessage(senderID, 'assistant', aiReply);
+
+          await sendFacebookMessage(senderID, aiReply);
+          console.log('Message sent successfully');
+
+        } catch (error) {
+          console.error('Error:', error.message);
+          try {
+            await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
+          } catch (sendError) {
+            console.error('Failed to send error:', sendError.message);
+          }
+        } finally {
+          sendTypingIndicator(senderID, false).catch(() => {});
+        }
+      }
+      
+      // Handle button clicks (postbacks)
+      else if (event.postback) {
+        const senderID = event.sender.id;
+        const payload = event.postback.payload;
+
+        console.log(`Postback from ${senderID}: ${payload}`);
+
+        try {
+          let response = '';
+          
+          switch(payload) {
+            case 'GET_STARTED':
+              // Clear conversation on fresh start
+              conversationManager.clearConversation(senderID);
+              response = "👋 Welcome! I'm your AI assistant. I can:\n\n✅ Answer questions\n✅ Provide information\n✅ Have intelligent conversations\n✅ Remember our chat context\n\nJust type your question and I'll respond!\n\n💡 Tip: Type /clear to reset our conversation.";
+              break;
+              
+            case 'ABOUT_BOT':
+              response = "🤖 I'm an AI-powered chatbot that can:\n\n💬 Chat naturally\n🧠 Remember our conversation\n🌡️ Check weather for cities\n📚 Answer questions\n\nBuilt with OpenRouter AI and running 24/7!";
+              break;
+              
+            case 'HELP':
+              response = "📖 Here's how to use me:\n\n💬 Just type any question\n🌡️ Ask 'weather in [city]'\n🔄 Type /clear to reset chat\n\nI remember our conversation, so feel free to ask follow-up questions!";
+              break;
+              
+            default:
+              response = "I received your message! How can I help you?";
           }
           
-          // Handle button clicks (postbacks)
-          else if (event.postback) {
-            const senderID = event.sender.id;
-            const payload = event.postback.payload;
-
-            console.log(`Postback from ${senderID}: ${payload}`);
-
-            try {
-              let response = '';
-              
-              switch(payload) {
-                case 'GET_STARTED':
-                  // Clear conversation on fresh start
-                  conversationManager.clearConversation(senderID);
-                  response = "👋 Welcome! I'm your AI assistant. I can:\n\n✅ Answer questions\n✅ Provide information\n✅ Have intelligent conversations\n✅ Remember our chat context\n\nJust type your question and I'll respond!\n\n💡 Tip: Type /clear to reset our conversation.";
-                  break;
-                  
-                case 'ABOUT_BOT':
-                  response = "🤖 I'm an AI assistant powered by OpenRouter.\n\n🧠 **Features:**\n• I remember our conversation!\n• I can refer back to what we discussed\n• You can ask follow-up questions\n• 🌡️ Weather (supports Kurdish cities!)\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• Weather in Hawler, Slemani, Duhok, etc.\n• And much more!\n\nWhat would you like to know?";
-                  break;
-                  
-                case 'START_CHAT':
-                  response = "💬 Great! I'm ready to chat. Ask me anything you'd like to know!";
-                  break;
-                  
-                case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Features:**\n• 🌡️ Weather: 'weather in Hawler' or 'Slemani weather'\n• 💬 Smart conversations with memory\n• ❓ Answer questions on any topic\n\n**Weather works with Kurdish names:**\n• Hawler / Erbil ✅\n• Slemani / Sulaymaniyah ✅\n• Duhok / Dwhok ✅\n• Halabja / 7alabja ✅\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I'm here 24/7!\n\nWhat can I help you with?";
-                  break;
-                  
-                case 'MAIN_MENU':
-                  response = "🏠 **Main Menu**\n\nWhat would you like to do?\n\n• Ask me a question\n• Learn what I can do\n• Get help using the bot\n• Type /clear to reset conversation\n\nJust type your message!";
-                  break;
-
-                case 'CLEAR_CHAT':
-                  conversationManager.clearConversation(senderID);
-                  response = "🔄 Conversation cleared! Let's start fresh. What would you like to talk about?";
-                  break;
-                  
-                default:
-                  response = "I'm here to help! What would you like to know?";
-              }
-              
-              await sendFacebookMessage(senderID, response);
-              console.log('Postback response sent');
-
-            } catch (error) {
-              console.error('Error handling postback:', error.message);
-            }
-          }
+          await sendFacebookMessage(senderID, response);
+          
+        } catch (error) {
+          console.error('Postback error:', error.message);
         }
       }
     }
-
-    res.status(200).send('EVENT_RECEIVED');
-
-  } catch (error) {
-    console.error('Webhook error:', error.message);
-    res.status(500).send('ERROR');
   }
-});
+}
 
 // ============================================
 // HELPER FUNCTIONS
@@ -415,20 +437,13 @@ Keep responses SHORT and conversational. You can reference previous messages in 
   // Build messages array with history
   const messages = [systemMessage];
   
-  // Add previous messages (excluding current one since we'll add it separately)
-  for (let i = 0; i < history.length - 1; i++) {
-    const msg = history[i];
+  // Add ALL previous messages from history
+  for (const msg of history) {
     messages.push({
       role: msg.role,
       content: msg.content
     });
   }
-
-  // Add current user message
-  messages.push({
-    role: 'user',
-    content: userMessage
-  });
 
   const response = await fetch(url, {
     method: 'POST',
@@ -439,7 +454,7 @@ Keep responses SHORT and conversational. You can reference previous messages in 
       'X-Title': 'Messenger AI Bot' // Optional
     },
     body: JSON.stringify({
-      model: 'tngtech/deepseek-r1t2-chimera:free', // Free model
+      model: 'google/gemini-2.0-flash-exp:free', // Free model - changed from deepseek
       messages: messages,
       temperature: 0.7,
       max_tokens: 1000
@@ -489,7 +504,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 // Health check
 app.get('/', (req, res) => {
   const stats = conversationManager.getStats();
-  res.send(`🤖 AI Bot - OpenRouter (Llama 3.1 8B)
+  res.send(`🤖 AI Bot - OpenRouter (Gemini 2.0 Flash)
   
 🧠 Memory Enabled
 🌡️ Weather: Enabled ✅ (Open-Meteo - No API key needed!)
