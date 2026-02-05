@@ -231,7 +231,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'ABOUT_BOT':
-                  response = "🤖 I'm an AI assistant powered by OpenRouter.\n\n🧠 **New Feature:** I now remember our conversation! This means:\n• I can refer back to what we discussed\n• You can ask follow-up questions\n• Context is preserved\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• And much more!\n\nWhat would you like to know?";
+                  response = "🤖 I'm an AI assistant powered by OpenRouter.\n\n🧠 **Features:**\n• I remember our conversation!\n• I can refer back to what we discussed\n• You can ask follow-up questions\n• 🌡️ Weather (supports Kurdish cities!)\n\nI can help with:\n• General knowledge\n• Explanations\n• Problem-solving\n• Creative writing\n• Weather in Hawler, Slemani, Duhok, etc.\n• And much more!\n\nWhat would you like to know?";
                   break;
                   
                 case 'START_CHAT':
@@ -239,7 +239,7 @@ app.post('/webhook', async (req, res) => {
                   break;
                   
                 case 'HELP':
-                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Features:**\n• 🌡️ Weather: Ask 'weather in [city]'\n• 💬 Smart conversations with memory\n• ❓ Answer questions on any topic\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I'm here 24/7!\n\nWhat can I help you with?";
+                  response = "🆘 **How to use me:**\n\n1️⃣ Just type your question\n2️⃣ I'll respond with helpful information\n3️⃣ You can ask follow-up questions - I remember!\n\n**Commands:**\n• /clear or /reset - Start a fresh conversation\n\n**Features:**\n• 🌡️ Weather: 'weather in Hawler' or 'Slemani weather'\n• 💬 Smart conversations with memory\n• ❓ Answer questions on any topic\n\n**Weather works with Kurdish names:**\n• Hawler / Erbil ✅\n• Slemani / Sulaymaniyah ✅\n• Duhok / Dwhok ✅\n• Halabja / 7alabja ✅\n\n**Tips:**\n• Be specific for better answers\n• I remember our chat (last 10 messages)\n• I'm here 24/7!\n\nWhat can I help you with?";
                   break;
                   
                 case 'MAIN_MENU':
@@ -280,16 +280,54 @@ app.post('/webhook', async (req, res) => {
 
 // Typing indicator
 
+// Normalize city names (handle alternative spellings)
+function normalizeCity(city) {
+  const cityMap = {
+    // Sulaymaniyah variations
+    'slemani': 'Sulaymaniyah',
+    'slemanyah': 'Sulaymaniyah',
+    'sulaumanyah': 'Sulaymaniyah',
+    'sulaimani': 'Sulaymaniyah',
+    'slemany': 'Sulaymaniyah',
+    
+    // Erbil variations
+    'hawler': 'Erbil',
+    'arbil': 'Erbil',
+    'irbil': 'Erbil',
+    
+    // Duhok variations
+    'dwhok': 'Duhok',
+    'dhok': 'Duhok',
+    'dahok': 'Duhok',
+    'dihok': 'Duhok',
+    
+    // Halabja variations
+    '7alabja': 'Halabja',
+    'halabjah': 'Halabja',
+    'halabja': 'Halabja',
+    
+    // Baghdad variations
+    'bghdad': 'Baghdad',
+    'baghdad': 'Baghdad'
+  };
+  
+  const lowerCity = city.toLowerCase().trim();
+  return cityMap[lowerCity] || city;
+}
+
 // Get weather information using Open-Meteo (no API key needed!)
 async function getWeather(city) {
   try {
+    // Normalize city name for alternative spellings
+    const normalizedCity = normalizeCity(city);
+    
     // Step 1: Get coordinates for the city
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(normalizedCity)}&count=1&language=en&format=json`;
     const geoResponse = await fetch(geoUrl);
     const geoData = await geoResponse.json();
 
     if (!geoData.results || geoData.results.length === 0) {
-      return `❌ Couldn't find "${city}". Try another city name (e.g., "Baghdad", "London").`;
+      return `❌ Couldn't find "${city}". Try another city name (e.g., "Baghdad", "Erbil", "Slemani").`;
     }
 
     const location = geoData.results[0];
