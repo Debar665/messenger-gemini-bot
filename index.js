@@ -170,9 +170,11 @@ async function processWebhookEvents(body) {
         console.log(`Message from ${senderID}: ${userMessage}`);
 
         try {
+          console.log('Step 1: Sending typing indicator...');
           sendTypingIndicator(senderID, true).catch(() => {});
 
           // Check for special commands
+          console.log('Step 2: Checking for special commands...');
           if (userMessage.toLowerCase() === '/clear' || userMessage.toLowerCase() === '/reset') {
             conversationManager.clearConversation(senderID);
             await sendFacebookMessage(senderID, "🔄 Conversation cleared! Let's start fresh. What would you like to talk about?");
@@ -233,20 +235,28 @@ async function processWebhookEvents(body) {
 
 
           // Add user message to history
+          console.log('Step 3: Adding message to conversation history...');
           conversationManager.addMessage(senderID, 'user', userMessage);
 
           // Get AI response with conversation history
+          console.log('Step 4: Calling OpenRouter API...');
           const aiReply = await callOpenRouterAPI(senderID, userMessage);
-          console.log('OpenRouter response received');
+          console.log('OpenRouter response received:', aiReply.substring(0, 100));
 
           // Add AI response to history
+          console.log('Step 5: Adding AI response to history...');
           conversationManager.addMessage(senderID, 'assistant', aiReply);
 
+          console.log('Step 6: Sending message to Facebook...');
           await sendFacebookMessage(senderID, aiReply);
           console.log('Message sent successfully');
 
         } catch (error) {
-          console.error('Error:', error.message);
+          console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+          });
           try {
             await sendFacebookMessage(senderID, 'Sorry, I had trouble with that. Try again?');
           } catch (sendError) {
@@ -404,9 +414,14 @@ async function sendTypingIndicator(recipientID, isTyping) {
 
 // Call OpenRouter API with conversation history
 async function callOpenRouterAPI(userID, userMessage) {
+  console.log('OpenRouter API: Starting...');
+  
   if (!OPENROUTER_API_KEY) {
+    console.error('OpenRouter API: API key is missing!');
     throw new Error('OpenRouter API key not configured');
   }
+  
+  console.log('OpenRouter API: API key found ✅');
 
   const url = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -432,7 +447,9 @@ Keep responses SHORT and conversational. You can reference previous messages in 
   };
 
   // Get conversation history
+  console.log('OpenRouter API: Getting conversation history...');
   const history = conversationManager.getHistory(userID);
+  console.log(`OpenRouter API: Found ${history.length} messages in history`);
 
   // Build messages array with history
   const messages = [systemMessage];
@@ -444,6 +461,8 @@ Keep responses SHORT and conversational. You can reference previous messages in 
       content: msg.content
     });
   }
+  
+  console.log(`OpenRouter API: Sending ${messages.length} messages to API...`);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -461,18 +480,24 @@ Keep responses SHORT and conversational. You can reference previous messages in 
     })
   });
 
+  console.log(`OpenRouter API: Response status: ${response.status}`);
+
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('OpenRouter API error:', errorText);
+    console.error('OpenRouter API error response:', errorText);
     throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
   }
 
+  console.log('OpenRouter API: Parsing response...');
   const data = await response.json();
+  console.log('OpenRouter API: Response parsed successfully');
   
   if (data.choices && data.choices[0] && data.choices[0].message) {
+    console.log('OpenRouter API: Got valid response ✅');
     return data.choices[0].message.content;
   }
   
+  console.error('OpenRouter API: Invalid response structure:', JSON.stringify(data));
   throw new Error('No response from OpenRouter');
 }
 
