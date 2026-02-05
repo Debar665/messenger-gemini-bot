@@ -454,7 +454,7 @@ Keep responses SHORT and conversational. You can reference previous messages in 
       'X-Title': 'Messenger AI Bot' // Optional
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.0-flash-exp:free', // Free model - changed from deepseek
+      model: 'tngtech/deepseek-r1t2-chimera:free', // Free model
       messages: messages,
       temperature: 0.7,
       max_tokens: 1000
@@ -504,7 +504,7 @@ async function sendFacebookMessage(recipientID, messageText) {
 // Health check
 app.get('/', (req, res) => {
   const stats = conversationManager.getStats();
-  res.send(`🤖 AI Bot - OpenRouter (Gemini 2.0 Flash)
+  res.send(`🤖 AI Bot - OpenRouter (DeepSeek R1T2 Chimera)
   
 🧠 Memory Enabled
 🌡️ Weather: Enabled ✅ (Open-Meteo - No API key needed!)
